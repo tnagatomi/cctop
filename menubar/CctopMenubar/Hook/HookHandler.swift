@@ -24,23 +24,35 @@ enum HookHandler {
         let terminal = captureTerminalInfo()
         let startTime = Session.processStartTime(pid: pid)
 
-        let freshSession = Session(sessionId: safeId, projectPath: input.cwd, branch: branch, terminal: terminal)
-        var session = loadOrCreateSession(
-            path: sessionPath, event: event, startTime: startTime, fresh: freshSession
-        )
+        // Lock the session file for the entire read-modify-write cycle.
+        // Without this, concurrent hook processes (e.g. PreToolUse + PostToolUse
+        // firing simultaneously) race: both read the old file, apply changes
+        // independently, and the last writer wins — clobbering the first writer's changes.
+        try withSessionLock(sessionPath: sessionPath) {
+            let freshSession = Session(sessionId: safeId, projectPath: input.cwd, branch: branch, terminal: terminal)
+            var session = loadOrCreateSession(
+                path: sessionPath, event: event, startTime: startTime, fresh: freshSession
+            )
 
-        session.pid = pid
-        session.pidStartTime = startTime
+            session.pid = pid
+            session.pidStartTime = startTime
 
-        let (oldStatus, newStatus) = applyTransition(&session, event: event, input: input, branch: branch, terminal: terminal)
-        applySideEffects(event: event, session: &session, input: input, sessionsDir: sessionsDir, safeId: safeId)
+            let (oldStatus, newStatus) = applyTransition(&session, event: event, input: input, branch: branch, terminal: terminal)
+            applySideEffects(event: event, session: &session, input: input, sessionsDir: sessionsDir, safeId: safeId)
 
-        let suffix = newStatus == nil ? " (preserved)" : ""
-        HookLogger.appendHookLog(
-            sessionId: safeId, event: hookName, label: label,
-            transition: "\(oldStatus) -> \(session.status.rawValue)\(suffix)"
-        )
-        try session.writeToFile(path: sessionPath)
+            let suffix = newStatus == nil ? " (preserved)" : ""
+            HookLogger.appendHookLog(
+                sessionId: safeId, event: hookName, label: label,
+                transition: "\(oldStatus) -> \(session.status.rawValue)\(suffix)"
+            )
+            try session.writeToFile(path: sessionPath)
+        }
+
+        // Cleanup runs outside the lock — it scans all session files and makes
+        // sysctl calls per file, which would unnecessarily hold the lock.
+        if event == .sessionStart {
+            cleanupSessionsForProject(sessionsDir: sessionsDir, projectPath: input.cwd, currentPid: pid)
+        }
     }
 
     private static func clearToolState(_ session: inout Session) {
@@ -79,7 +91,6 @@ enum HookHandler {
         case .sessionStart:
             clearToolState(&session)
             session.workspaceFile = Session.findWorkspaceFile(in: input.cwd)
-            cleanupSessionsForProject(sessionsDir: sessionsDir, projectPath: input.cwd, currentPid: session.pid)
 
         case .userPromptSubmit:
             clearToolState(&session)
@@ -302,12 +313,38 @@ enum HookHandler {
 
     private static func removeSession(at path: String, sessionId: String) {
         try? FileManager.default.removeItem(atPath: path)
+        try? FileManager.default.removeItem(atPath: path + ".lock")
         HookLogger.cleanupSessionLog(sessionId: sessionId)
     }
 
     private static func isPIDAlive(_ pid: UInt32) -> Bool {
         kill(Int32(pid), 0) == 0 || errno == EPERM
     }
+}
+
+// MARK: - Session File Locking
+
+/// Acquire an exclusive flock on a `.lock` file alongside the session file.
+/// This serializes concurrent hook processes operating on the same session,
+/// preventing read-modify-write races when multiple hooks fire simultaneously.
+func withSessionLock(sessionPath: String, body: () throws -> Void) throws {
+    let lockPath = sessionPath + ".lock"
+    let fd = open(lockPath, O_CREAT | O_WRONLY, 0o600)
+    guard fd >= 0 else {
+        let err = errno
+        HookLogger.logError("withSessionLock: open(\(lockPath)) failed: \(err)")
+        throw NSError(domain: NSPOSIXErrorDomain, code: Int(err),
+                      userInfo: [NSLocalizedDescriptionKey: "Failed to open lock file: \(lockPath)"])
+    }
+    defer { close(fd) }
+    guard flock(fd, LOCK_EX) == 0 else {
+        let err = errno
+        HookLogger.logError("withSessionLock: flock(\(lockPath)) failed: \(err)")
+        throw NSError(domain: NSPOSIXErrorDomain, code: Int(err),
+                      userInfo: [NSLocalizedDescriptionKey: "Failed to acquire lock: \(lockPath)"])
+    }
+    defer { flock(fd, LOCK_UN) }
+    try body()
 }
 
 // MARK: - Tool Detail Extraction
