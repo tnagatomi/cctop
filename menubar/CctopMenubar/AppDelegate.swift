@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import AppKit
 import Combine
 import KeyboardShortcuts
@@ -12,13 +13,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     private var pluginManager: PluginManager!
     private var historyManager: HistoryManager!
     private var refocusController = RefocusController()
-    private var compactController = CompactModeController()
+    private var notchController = NotchStatusController()
     private var navKeyMonitor: Any?
     private var previousApp: NSRunningApplication?
     private var lastExternalApp: NSRunningApplication?
     private var panelMode: PanelMode = .hidden
     private var screenChangeWork: DispatchWorkItem?
+    private var notchVisibilityWork: DispatchWorkItem?
     private var suppressResize = false
+    private var lastRenderedCounts: StatusCounts?
+    private var hasNotch = false
     private var cancellables: Set<AnyCancellable> = []
     @AppStorage("appearanceMode") var appearanceMode: String = "system"
 
@@ -32,14 +36,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         pluginManager = PluginManager()
 
         setupStatusItem()
+        hasNotch = NSScreen.builtin?.hasPhysicalNotch == true
 
         let contentView = PanelContentView(
             sessionManager: sessionManager,
             historyManager: historyManager,
             updater: updater,
             pluginManager: pluginManager,
-            refocus: refocusController,
-            compactController: compactController
+            refocus: refocusController
         )
         let hostingView = NSHostingView(rootView: contentView)
         hostingView.wantsLayer = true
@@ -69,10 +73,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             .receive(on: RunLoop.main)
             .sink { [weak self] in self?.handleEvent(.refocusConfirmed) }
             .store(in: &cancellables)
-        compactController.objectWillChange
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in DispatchQueue.main.async { self?.resizePanel(animate: true) } }
-            .store(in: &cancellables)
         registerObservers()
     }
 
@@ -93,11 +93,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             self?.lastExternalApp = app
         }
         nc.addObserver(
-            forName: .panelHeaderClicked, object: nil, queue: .main
-        ) { [weak self] _ in
-            self?.handleEvent(.headerClicked)
-        }
-        nc.addObserver(
             forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
             self?.handleEvent(.appLostFocus)
@@ -107,25 +102,44 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         ) { [weak self] _ in
             self?.handleScreenChange()
         }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.updateNotchVisibility()
+        }
+        nc.addObserver(
+            forName: .notchPillClicked, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.togglePanel()
+        }
     }
 
     @MainActor private func observeSessionUpdates() {
         sessionManager.$sessions
             .receive(on: RunLoop.main)
             .sink { [weak self] sessions in
-                let count = sessions.filter { $0.status.needsAttention }.count
-                self?.statusItem.button?.title = count > 0 ? "\(count)" : ""
-                let a11yLabel = count > 0
-                    ? "cctop, \(count) session\(count == 1 ? "" : "s") need attention"
-                    : "cctop, \(sessions.count) session\(sessions.count == 1 ? "" : "s")"
-                self?.statusItem.button?.setAccessibilityLabel(a11yLabel)
-                if self?.panel.isVisible == true {
+                guard let self else { return }
+                let counts = StatusCounts(sessions: sessions)
+
+                if counts != self.lastRenderedCounts {
+                    self.refreshStatusDisplay(counts: counts)
+                }
+
+                if self.panel.isVisible == true {
                     DispatchQueue.main.async { [weak self] in
                         self?.resizePanel(animate: true)
                     }
                 }
             }
             .store(in: &cancellables)
+    }
+
+    @MainActor private func refreshStatusDisplay(counts: StatusCounts) {
+        lastRenderedCounts = counts
+        statusItem.button?.image = MenubarIconRenderer.render(counts: counts)
+        notchController.update(counts: counts)
+        updateNotchVisibility()
+        statusItem.button?.setAccessibilityLabel(counts.accessibilityLabel)
     }
 
     private func setupStatusItem() {
@@ -143,15 +157,43 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         handleEvent(.menubarIconClicked(appIsActive: NSApp.isActive))
     }
 
+    /// Whether the status item is hidden behind the notch.
+    private var isStatusItemOccluded: Bool {
+        guard let screen = NSScreen.builtin, screen.hasPhysicalNotch else { return false }
+        guard let window = statusItem.button?.window, window.frame.width > 0 else { return true }
+
+        // macOS may keep the window but stop rendering it when space is tight
+        if !window.occlusionState.contains(.visible) { return true }
+
+        let visibleMinX = screen.frame.maxX - (screen.auxiliaryTopRightArea?.width ?? 0)
+        return window.frame.minX < visibleMinX
+    }
+
+    /// Show notch panel when the menubar icon is hidden behind the notch.
+    @MainActor private func updateNotchVisibility(immediate: Bool = false) {
+        notchVisibilityWork?.cancel()
+        guard hasNotch else {
+            notchController.tearDown(); return
+        }
+        let counts = lastRenderedCounts ?? .zero
+        let show: () -> Void = { [weak self] in
+            guard let self, self.hasNotch, let screen = NSScreen.builtin,
+                  self.isStatusItemOccluded else {
+                self?.notchController.tearDown(); return
+            }
+            self.notchController.showOnScreen(screen, counts: counts)
+        }
+        guard !immediate else { show(); return }
+        let work = DispatchWorkItem(block: show)
+        notchVisibilityWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+    }
+
     private func applyAppearance() {
-        let mode = AppearanceMode(rawValue: appearanceMode) ?? .system
-        switch mode {
-        case .system:
-            panel?.appearance = nil
-        case .light:
-            panel?.appearance = NSAppearance(named: .aqua)
-        case .dark:
-            panel?.appearance = NSAppearance(named: .darkAqua)
+        switch AppearanceMode(rawValue: appearanceMode) ?? .system {
+        case .system: panel?.appearance = nil
+        case .light: panel?.appearance = NSAppearance(named: .aqua)
+        case .dark: panel?.appearance = NSAppearance(named: .darkAqua)
         }
     }
 
@@ -178,10 +220,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     }
 
     private func positionPanel(animate: Bool = false) {
-        guard let button = statusItem.button, let buttonWindow = button.window else { return }
-        let screenRect = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
         guard let (width, height) = panelFittingSize() else { return }
-        let newFrame = NSRect(x: screenRect.midX - width / 2, y: screenRect.minY - height - 4, width: width, height: height)
+
+        // Use the notch pill position when the menubar icon is hidden behind the notch
+        let anchorRect: NSRect
+        if let pillFrame = notchController.pillFrame {
+            anchorRect = pillFrame
+        } else if let button = statusItem.button, let buttonWindow = button.window {
+            anchorRect = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
+        } else {
+            return
+        }
+
+        var panelX = anchorRect.midX - width / 2
+        // Clamp to the screen that contains the anchor (pill or menubar icon)
+        let anchorScreen = NSScreen.screens.first { $0.frame.contains(anchorRect.origin) }
+        if let visibleFrame = (anchorScreen ?? NSScreen.main)?.visibleFrame {
+            panelX = max(visibleFrame.minX + 4, min(panelX, visibleFrame.maxX - width - 4))
+        }
+
+        let newFrame = NSRect(
+            x: panelX, y: anchorRect.minY - height - 4,
+            width: width, height: height
+        )
         setPanelFrame(newFrame, animate: animate)
     }
 
@@ -191,6 +252,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.suppressResize = false
+            self.hasNotch = NSScreen.builtin?.hasPhysicalNotch == true
+            self.refreshStatusDisplay(counts: StatusCounts(sessions: self.sessionManager.sessions))
             guard self.panel.isVisible else { return }
             self.positionPanel(animate: false)
         }
@@ -208,8 +271,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
     private func panelFittingSize() -> (width: CGFloat, height: CGFloat)? {
         panel.contentView?.layout()
-        guard let fittingSize = panel.contentView?.fittingSize else { return nil }
-        return (max(fittingSize.width, 320), min(fittingSize.height, 600))
+        guard let size = panel.contentView?.fittingSize else { return nil }
+        return (max(size.width, 320), min(size.height, 600))
     }
 
     private func setPanelFrame(_ frame: NSRect, animate: Bool) {
@@ -224,7 +287,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         }
     }
 }
-
 // MARK: - PanelCoordinator dispatch
 
 private let navKeyMap: [UInt16: PanelNavAction] = [
@@ -240,23 +302,18 @@ private let navKeyMap: [UInt16: PanelNavAction] = [
 extension AppDelegate {
     @MainActor @discardableResult
     func handleEvent(_ event: PanelEvent) -> Bool {
-        let panelState = PanelState(
-            mode: panelMode,
-            compactPreference: compactController.compactMode
-        )
+        let panelState = PanelState(mode: panelMode)
         let result = PanelCoordinator.handle(event: event, state: panelState)
         panelMode = result.state.mode
         execute(result.actions)
-        compactController.compactMode = result.state.compactPreference
-        compactController.syncVisualState(panelMode)
         return result.eventConsumed
     }
 
-    // swiftlint:disable:next cyclomatic_complexity
     @MainActor private func execute(_ actions: [PanelAction]) {
         for action in actions {
             switch action {
             case .showPanel:
+                notchVisibilityWork?.cancel()
                 panel.makeKeyAndOrderFront(nil)
                 // Re-position after SwiftUI layout settles
                 DispatchQueue.main.async { [weak self] in
@@ -266,6 +323,7 @@ extension AppDelegate {
                 panel.orderOut(nil)
                 previousApp = nil
                 stopNavKeyMonitor()
+                updateNotchVisibility(immediate: true)
             case .refocusPanel:
                 panel.makeKeyAndOrderFront(nil)
             case .positionPanel:
@@ -298,8 +356,6 @@ extension AppDelegate {
                 }
             case .endRefocusMode:
                 refocusController.deactivate()
-            case .persistCompactMode:
-                break // Handled elsewhere: persistence via @AppStorage
             }
         }
     }
@@ -319,12 +375,6 @@ extension AppDelegate {
             if self.refocusController.isActive,
                let char = event.characters, let digit = Int(char), digit >= 1, digit <= 9 {
                 DispatchQueue.main.async { self.jumpToSession(index: digit - 1) }
-                return nil
-            }
-
-            // Cmd+M toggles compact mode (keyCode 46 = 'm')
-            if event.modifierFlags.contains(.command) && event.keyCode == 46 {
-                DispatchQueue.main.async { self.handleEvent(.cmdM) }
                 return nil
             }
 
@@ -363,7 +413,6 @@ extension AppDelegate {
     }
 }
 // MARK: - Hook binary installation
-
 extension AppDelegate {
     /// Symlinks cctop-hook from the app bundle into ~/.cctop/bin/ so hooks can find it.
     func installHookBinaryIfNeeded() {
