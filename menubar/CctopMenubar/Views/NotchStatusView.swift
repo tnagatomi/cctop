@@ -2,6 +2,7 @@ import SwiftUI
 
 struct NotchStatusView: View {
     let counts: StatusCounts
+    var themeId: String = ""
 
     var body: some View {
         HStack(spacing: 4) {
@@ -10,9 +11,10 @@ struct NotchStatusView: View {
 
             if counts.total > 0 {
                 StatusBar(counts: counts)
-                    .frame(width: 36, height: 5)
+                    .frame(width: 36, height: 4)
             }
         }
+        .id(themeId)
         .padding(.leading, 5)
         .padding(.trailing, 2)
         .padding(.top, 4)
@@ -33,14 +35,14 @@ private struct GridIcon: View {
     }
 
     var body: some View {
-        VStack(spacing: 1.5) {
-            HStack(spacing: 1.5) {
+        VStack(spacing: 1) {
+            HStack(spacing: 1) {
                 RoundedRectangle(cornerRadius: 0.5)
                     .fill(tint.opacity(0.85))
                 RoundedRectangle(cornerRadius: 0.5)
                     .fill(tint.opacity(0.85))
             }
-            HStack(spacing: 1.5) {
+            HStack(spacing: 1) {
                 RoundedRectangle(cornerRadius: 0.5)
                     .fill(tint.opacity(0.50))
                 RoundedRectangle(cornerRadius: 0.5)
