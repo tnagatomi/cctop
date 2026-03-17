@@ -291,28 +291,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         completionHandler([.banner, .sound])
     }
 
+    private var screenLayouts: [ScreenLayout] {
+        NSScreen.screens.map { ScreenLayout($0) }
+    }
+
     @MainActor private func positionPanel(animate: Bool = false) {
-        if let saved = savedPanelPosition(), let (width, height) = panelFittingSize() {
-            // If clicked on a different screen than the saved position, ignore saved position
-            if let loc = clickLocation,
-               let clickScreen = NSScreen.screens.first(where: { NSMouseInRect(loc, $0.frame, false) }) {
-                let savedPoint = NSPoint(x: saved.originX, y: saved.topY)
-                if !clickScreen.frame.contains(savedPoint) {
-                    positionPanelAtAnchor(animate: animate)
-                    return
-                }
-            }
-            let clamped = clampToScreen(
-                originX: saved.originX, topY: saved.topY,
-                width: width, height: height
-            )
-            let newFrame = NSRect(
-                x: clamped.originX, y: clamped.topY - height,
-                width: width, height: height
-            )
-            setPanelFrame(newFrame, animate: animate)
-        } else {
-            positionPanelAtAnchor(animate: animate)
+        guard let size = panelFittingSize() else { return }
+        if let frame = PanelPositioning.resolveShowPosition(
+            savedPosition: savedPanelPosition(),
+            clickLocation: clickLocation,
+            anchorRect: anchorRect(),
+            panelSize: size,
+            screens: screenLayouts
+        ) {
+            setPanelFrame(frame, animate: animate)
         }
     }
 
@@ -330,78 +322,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     /// as the anchor (menubar icon / notch pill), snap to anchor. Otherwise, snap
     /// to the top-center of the panel's current screen so it doesn't jump across screens.
     @MainActor private func resetPanelToCurrentScreen(animate: Bool = false) {
-        guard let (width, height) = panelFittingSize() else { return }
-
-        let anchorScreen = anchorRect().flatMap { rect in
-            NSScreen.screens.first { $0.frame.contains(rect.origin) }
+        guard let size = panelFittingSize() else { return }
+        let layouts = screenLayouts
+        let panelIdx = (panel.screen ?? NSScreen.main).flatMap { screen in
+            layouts.firstIndex { $0.frame == ScreenLayout(screen).frame }
         }
-        let panelScreen = panel.screen ?? NSScreen.main
-
-        if anchorScreen == panelScreen {
-            positionPanelAtAnchor(animate: animate)
-            return
+        if let frame = PanelPositioning.resolveResetPosition(
+            anchorRect: anchorRect(),
+            panelScreenIndex: panelIdx,
+            panelSize: size,
+            screens: layouts
+        ) {
+            setPanelFrame(frame, animate: animate)
         }
-        guard let vf = panelScreen?.visibleFrame else {
-            positionPanelAtAnchor(animate: animate)
-            return
-        }
-        let panelX = max(vf.minX + 4, min(vf.midX - width / 2, vf.maxX - width - 4))
-        let newFrame = NSRect(x: panelX, y: vf.maxY - 4 - height, width: width, height: height)
-        setPanelFrame(newFrame, animate: animate)
     }
 
     @MainActor private func positionPanelAtAnchor(animate: Bool = false) {
-        guard let (width, height) = panelFittingSize() else { return }
-
-        let anchor: NSRect
-        let targetScreen: NSScreen?
-
-        if let buttonAnchor = anchorRect() {
-            let anchorScreen = NSScreen.screens.first { $0.frame.contains(buttonAnchor.origin) }
-            let clickScreen = clickLocation.flatMap { loc in
-                NSScreen.screens.first { NSMouseInRect(loc, $0.frame, false) }
-            }
-            if let click = clickScreen, click != anchorScreen, let loc = clickLocation {
-                // Clicked on a different screen — synthesize anchor at the click X position
-                anchor = NSRect(
-                    x: loc.x - 10, y: click.visibleFrame.maxY - 22,
-                    width: 20, height: 22
-                )
-                targetScreen = click
-            } else {
-                anchor = buttonAnchor
-                targetScreen = anchorScreen
-            }
-        } else {
-            return
+        guard let size = panelFittingSize() else { return }
+        if let frame = PanelPositioning.resolveAnchorPosition(
+            anchorRect: anchorRect(),
+            clickLocation: clickLocation,
+            panelSize: size,
+            screens: screenLayouts
+        ) {
+            setPanelFrame(frame, animate: animate)
         }
-
-        var panelX = anchor.midX - width / 2
-        if let visibleFrame = (targetScreen ?? NSScreen.main)?.visibleFrame {
-            panelX = max(visibleFrame.minX + 4, min(panelX, visibleFrame.maxX - width - 4))
-        }
-
-        let newFrame = NSRect(
-            x: panelX, y: anchor.minY - height - 4,
-            width: width, height: height
-        )
-        setPanelFrame(newFrame, animate: animate)
-    }
-
-    private func clampToScreen(
-        originX: CGFloat, topY: CGFloat, width: CGFloat, height: CGFloat
-    ) -> (originX: CGFloat, topY: CGFloat) {
-        let point = NSPoint(x: originX, y: topY)
-        let panelRect = NSRect(x: originX, y: topY - height, width: width, height: height)
-        let screens = NSScreen.screens
-        let screen = screens.first { $0.frame.contains(point) }
-                     ?? screens.first { $0.visibleFrame.intersects(panelRect) }
-                     ?? NSScreen.main
-        guard let vf = screen?.visibleFrame else { return (originX, topY) }
-        let margin: CGFloat = 4
-        let clampedX = max(vf.minX + margin, min(originX, vf.maxX - width - margin))
-        let clampedTopY = max(vf.minY + height + margin, min(topY, vf.maxY - margin))
-        return (clampedX, clampedTopY)
     }
 
     @MainActor private func handleScreenChange() {
@@ -426,32 +371,33 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
     private func resizePanel(animate: Bool = false) {
         guard !suppressResize else { return }
-        guard let (width, height) = panelFittingSize() else { return }
+        guard let size = panelFittingSize() else { return }
         let oldFrame = panel.frame
         let newFrame: NSRect
         if hasCustomPanelPosition {
             // Keep top-left corner stable
             newFrame = NSRect(
-                x: oldFrame.origin.x, y: oldFrame.maxY - height,
-                width: width, height: height
+                x: oldFrame.origin.x, y: oldFrame.maxY - size.height,
+                width: size.width, height: size.height
             )
         } else {
             // Keep midX centered, top edge stable
             newFrame = NSRect(
-                x: oldFrame.midX - width / 2, y: oldFrame.maxY - height,
-                width: width, height: height
+                x: oldFrame.midX - size.width / 2, y: oldFrame.maxY - size.height,
+                width: size.width, height: size.height
             )
         }
         setPanelFrame(newFrame, animate: animate)
     }
 
-    private func panelFittingSize() -> (width: CGFloat, height: CGFloat)? {
+    private func panelFittingSize() -> NSSize? {
         panel.contentView?.layout()
         guard let size = panel.contentView?.fittingSize else { return nil }
-        return (max(size.width, 320), min(size.height, 600))
+        return NSSize(width: max(size.width, 320), height: min(size.height, 600))
     }
 
     private func setPanelFrame(_ frame: NSRect, animate: Bool) {
+        guard panel.frame != frame else { return }
         if animate {
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.2
@@ -498,6 +444,7 @@ extension AppDelegate {
                 }
             case .dismissPanel:
                 panel.orderOut(nil)
+                clickLocation = nil
                 previousApp = nil
                 stopNavKeyMonitor()
                 updateNotchVisibility(immediate: true)
