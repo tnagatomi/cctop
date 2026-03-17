@@ -112,12 +112,12 @@ struct PopupView: View {
                     EmptyStateView(pluginManager: pluginManager)
                 }
             } else {
+                VStack(spacing: 0) {
                 if showOcBanner {
-                    OpenCodeBanner(
-                        pluginManager: pluginManager,
-                        installed: $ocBannerInstalled,
-                        dismissed: $ocBannerDismissed
-                    )
+                    ToolInstallBanner(
+                        toolName: "opencode", iconLabel: ">_", iconColor: .blue,
+                        installAction: { pluginManager?.installOpenCodePlugin() ?? false },
+                        installed: $ocBannerInstalled, dismissed: $ocBannerDismissed)
                 }
                 ScrollViewReader { proxy in
                     ScrollView(showsIndicators: false) {
@@ -159,6 +159,7 @@ struct PopupView: View {
                             proxy.scrollTo(sortedSessions[idx].id, anchor: .center)
                         }
                     }
+                }
                 }
             }
         }
