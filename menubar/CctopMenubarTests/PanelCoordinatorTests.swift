@@ -17,6 +17,7 @@ final class PanelCoordinatorTests: XCTestCase {
         XCTAssertTrue(r.actions.contains(.showPanel))
         XCTAssertTrue(r.actions.contains(.captureApps))
         XCTAssertTrue(r.actions.contains(.startNavKeyMonitor))
+        XCTAssertFalse(r.actions.contains(.positionPanel))
     }
 
     func testHidden_navigateShortcut() {
@@ -51,6 +52,20 @@ final class PanelCoordinatorTests: XCTestCase {
         XCTAssertEqual(r.state.mode, .hidden)
         XCTAssertTrue(r.actions.contains(.dismissPanel))
         XCTAssertFalse(r.actions.contains(.restorePreviousApp))
+    }
+
+    func testNormal_menubarClickDifferentScreen_repositionsWithoutDismiss() {
+        let r = handle(.menubarIconClicked(appIsActive: true, onDifferentScreen: true), mode: .normal)
+        XCTAssertEqual(r.state.mode, .normal)
+        XCTAssertTrue(r.actions.contains(.positionPanel))
+        XCTAssertTrue(r.actions.contains(.activateApp))
+        XCTAssertFalse(r.actions.contains(.dismissPanel))
+    }
+
+    func testNormal_menubarClickSameScreen_dismisses() {
+        let r = handle(.menubarIconClicked(appIsActive: true, onDifferentScreen: false), mode: .normal)
+        XCTAssertEqual(r.state.mode, .hidden)
+        XCTAssertTrue(r.actions.contains(.dismissPanel))
     }
 
     func testNormal_escape_postsEscapeAction() {

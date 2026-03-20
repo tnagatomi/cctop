@@ -29,16 +29,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     @AppStorage("appearanceMode") var appearanceMode: String = "system"
 
     private enum PanelPositionKeys {
-        static let originX = "panelCustomX"
-        static let topY = "panelCustomTopY"
-    }
-
-    private var hasCustomPanelPosition: Bool {
-        UserDefaults.standard.object(forKey: PanelPositionKeys.originX) != nil
+        static let positions = "panelPositions"
+        // MIGRATION(v0.12.0→v0.13.0): Remove legacyOriginX, legacyTopY, migrateLegacyPanelPosition
+        static let legacyOriginX = "panelCustomX"
+        static let legacyTopY = "panelCustomTopY"
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.register(defaults: ["notificationsEnabled": true])
+        migrateLegacyPanelPosition()
         installHookBinaryIfNeeded()
         UNUserNotificationCenter.current().delegate = self
         notchController = NotchStatusController()
@@ -70,6 +69,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             defer: false
         )
         panel.contentView = hostingView
+        panel.panelDelegate = self
 
         applyAppearance()
         registerShortcuts()
@@ -126,19 +126,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         ) { [weak self] _ in
             self?.togglePanel()
         }
-        nc.addObserver(
-            forName: .panelDragEnded, object: nil, queue: .main
-        ) { [weak self] notification in
-            guard let originX = notification.userInfo?[PanelDragKeys.originX] as? CGFloat,
-                  let topY = notification.userInfo?[PanelDragKeys.topY] as? CGFloat else { return }
-            self?.saveCustomPanelPosition(originX: originX, topY: topY)
-        }
-        nc.addObserver(
-            forName: .resetPanelPosition, object: nil, queue: .main
-        ) { [weak self] _ in
-            self?.clearCustomPanelPosition()
-            self?.resetPanelToCurrentScreen(animate: true)
-        }
     }
 
     @MainActor private func observeSessionUpdates() {
@@ -193,7 +180,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
     @MainActor @objc private func togglePanel() {
         clickLocation = NSEvent.mouseLocation
-        handleEvent(.menubarIconClicked(appIsActive: NSApp.isActive))
+
+        let onDifferentScreen: Bool = {
+            guard panelMode == .normal,
+                  let click = clickLocation,
+                  let clickKey = screenKey(at: click),
+                  let currentKey = panelScreenKey() else { return false }
+            return clickKey != currentKey
+        }()
+
+        handleEvent(.menubarIconClicked(appIsActive: NSApp.isActive, onDifferentScreen: onDifferentScreen))
     }
 
     /// Whether the status item is hidden behind the notch.
@@ -249,24 +245,53 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         }
     }
 
-    // MARK: - Custom panel position
+    // MARK: - Custom panel position (per-screen)
 
-    private func saveCustomPanelPosition(originX: CGFloat, topY: CGFloat) {
-        UserDefaults.standard.set(originX, forKey: PanelPositionKeys.originX)
-        UserDefaults.standard.set(topY, forKey: PanelPositionKeys.topY)
+    private func saveCustomPanelPosition(originX: CGFloat, topY: CGFloat, forScreenKey key: String) {
+        var dict = savedPanelPositionsDict()
+        dict[key] = ["originX": originX, "topY": topY]
+        UserDefaults.standard.set(dict, forKey: PanelPositionKeys.positions)
     }
 
-    private func clearCustomPanelPosition() {
-        UserDefaults.standard.removeObject(forKey: PanelPositionKeys.originX)
-        UserDefaults.standard.removeObject(forKey: PanelPositionKeys.topY)
+    private func clearCustomPanelPosition(forScreenKey key: String) {
+        var dict = savedPanelPositionsDict()
+        dict.removeValue(forKey: key)
+        UserDefaults.standard.set(dict, forKey: PanelPositionKeys.positions)
     }
 
-    private func savedPanelPosition() -> (originX: CGFloat, topY: CGFloat)? {
-        guard let originX = UserDefaults.standard.object(forKey: PanelPositionKeys.originX) as? Double else {
-            return nil
+    private func savedPanelPositions() -> [String: (originX: CGFloat, topY: CGFloat)] {
+        savedPanelPositionsDict().compactMapValues { entry in
+            guard let originX = entry["originX"], let topY = entry["topY"] else { return nil }
+            return (originX: originX, topY: topY)
         }
-        let topY = UserDefaults.standard.double(forKey: PanelPositionKeys.topY)
-        return (originX: CGFloat(originX), topY: CGFloat(topY))
+    }
+
+    private func savedPanelPositionsDict() -> [String: [String: CGFloat]] {
+        UserDefaults.standard.dictionary(forKey: PanelPositionKeys.positions)
+            as? [String: [String: CGFloat]] ?? [:]
+    }
+
+    /// The screen key for the screen the panel is currently on.
+    @MainActor private func panelScreenKey() -> String? {
+        guard let panelScreen = panel.screen ?? NSScreen.main else { return nil }
+        return panelScreen.screenKey
+    }
+
+    /// The screen key for the screen containing a point.
+    private func screenKey(at point: NSPoint) -> String? {
+        NSScreen.screens.first { NSMouseInRect(point, $0.frame, false) }?.screenKey
+    }
+
+    /// Migrate legacy single-position UserDefaults to per-screen dictionary.
+    private func migrateLegacyPanelPosition() {
+        let ud = UserDefaults.standard
+        guard let originX = ud.object(forKey: PanelPositionKeys.legacyOriginX) as? Double else { return }
+        let topY = ud.double(forKey: PanelPositionKeys.legacyTopY)
+        let point = NSPoint(x: originX, y: topY)
+        let key = screenKey(at: point) ?? NSScreen.main?.screenKey ?? "builtin"
+        saveCustomPanelPosition(originX: CGFloat(originX), topY: CGFloat(topY), forScreenKey: key)
+        ud.removeObject(forKey: PanelPositionKeys.legacyOriginX)
+        ud.removeObject(forKey: PanelPositionKeys.legacyTopY)
     }
 
     func userNotificationCenter(
@@ -297,8 +322,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
     @MainActor private func positionPanel(animate: Bool = false) {
         guard let size = panelFittingSize() else { return }
+        let clickKey = clickLocation.flatMap { screenKey(at: $0) }
+            ?? panelScreenKey()
         if let frame = PanelPositioning.resolveShowPosition(
-            savedPosition: savedPanelPosition(),
+            savedPositions: savedPanelPositions(),
+            clickScreenKey: clickKey,
             clickLocation: clickLocation,
             anchorRect: anchorRect(),
             panelSize: size,
@@ -360,21 +388,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             guard self.panel.isVisible else { return }
             self.positionPanel(animate: false)
             // Update saved position if it was clamped to new screen bounds
-            if self.hasCustomPanelPosition {
+            if let key = self.panelScreenKey(),
+               self.savedPanelPositions()[key] != nil {
                 let frame = self.panel.frame
-                self.saveCustomPanelPosition(originX: frame.origin.x, topY: frame.maxY)
+                self.saveCustomPanelPosition(
+                    originX: frame.origin.x, topY: frame.maxY, forScreenKey: key
+                )
             }
         }
         screenChangeWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
-    private func resizePanel(animate: Bool = false) {
+    @MainActor private func resizePanel(animate: Bool = false) {
         guard !suppressResize else { return }
         guard let size = panelFittingSize() else { return }
         let oldFrame = panel.frame
+        let hasPositionOnCurrentScreen = panelScreenKey().map { savedPanelPositions()[$0] != nil } ?? false
         let newFrame: NSRect
-        if hasCustomPanelPosition {
+        if hasPositionOnCurrentScreen {
             // Keep top-left corner stable
             newFrame = NSRect(
                 x: oldFrame.origin.x, y: oldFrame.maxY - size.height,
@@ -431,6 +463,7 @@ extension AppDelegate {
         return result.eventConsumed
     }
 
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
     @MainActor private func execute(_ actions: [PanelAction]) {
         for action in actions {
             switch action {
@@ -452,6 +485,13 @@ extension AppDelegate {
                 panel.makeKeyAndOrderFront(nil)
             case .positionPanel:
                 positionPanel()
+                // If panel didn't land on target screen, clear stale position and retry
+                if let click = clickLocation,
+                   let clickKey = screenKey(at: click),
+                   panelScreenKey() != clickKey {
+                    clearCustomPanelPosition(forScreenKey: clickKey)
+                    positionPanel()
+                }
             case .activateApp:
                 NSApp.activate(ignoringOtherApps: true)
             case .deactivateApp:
@@ -534,6 +574,20 @@ extension AppDelegate {
 
     private func postNavAction(_ action: PanelNavAction) {
         navigateController.navActionSubject.send(action)
+    }
+}
+// MARK: - FloatingPanelDelegate
+extension AppDelegate: FloatingPanelDelegate {
+    @MainActor func panelDidDrag(originX: CGFloat, topY: CGFloat) {
+        guard let key = panelScreenKey() else { return }
+        saveCustomPanelPosition(originX: originX, topY: topY, forScreenKey: key)
+    }
+
+    @MainActor func panelDidRequestReset() {
+        if let key = panelScreenKey() {
+            clearCustomPanelPosition(forScreenKey: key)
+        }
+        resetPanelToCurrentScreen(animate: true)
     }
 }
 // MARK: - Hook binary installation
