@@ -154,6 +154,10 @@ rm ~/.config/opencode/plugins/cctop.js
 # Remove the pi extension
 rm ~/.pi/agent/extensions/cctop.ts
 
+# Remove the Codex CLI plugin
+rm ~/.codex/cctop-shim.sh
+# Then remove cctop entries from ~/.codex/hooks.json (or delete it if cctop was the only user)
+
 # Remove session data and config
 rm -rf ~/.cctop
 ```
