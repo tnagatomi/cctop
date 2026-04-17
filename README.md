@@ -5,7 +5,7 @@
 
 **A keyboard-first menubar app to monitor and jump between AI coding sessions — minimum setup required.**
 
-Works with your existing editor and terminal. No IDE needed, no workflow changes — just install the app, connect your tools, and every session shows up in a floating panel you can navigate with your keyboard.
+Works with your existing editor, terminal, and workflow.
 
 <table align="center">
   <tr>
@@ -19,10 +19,6 @@ Works with your existing editor and terminal. No IDE needed, no workflow changes
 </table>
 
 ## Features
-
-**At-a-glance status.** A floating menubar panel shows all active sessions with color-coded badges: idle, working, waiting for input, waiting for permission, compacting. See the current prompt or tool in use (e.g. "Editing auth.ts") without switching windows.
-
-**Jump directly to any session.** Click a session card to raise its VS Code, Cursor, or iTerm2 window — or stay on the keyboard. Arrow keys to browse, Enter to jump, Tab to switch tabs.
 
 **Draggable panel.** Drag the header to reposition the panel anywhere on screen — position persists across launches. Double-click the header to snap back to the default menubar anchor.
 
@@ -45,9 +41,6 @@ Works with your existing editor and terminal. No IDE needed, no workflow changes
 </p>
 
 **Smart status icon.** See session health without opening the panel:
-- **Status bar:** A proportional bar next to the icon shows green (working), amber (needs input), red (permission pending), or gray (idle).
-- **Attention tint:** When any session needs your input, the icon shifts to terracotta — visible even in your peripheral vision.
-- **Notch-aware:** On MacBooks where the notch hides the menubar icon, a small status pill appears next to the camera so you always have a signal.
 
 <p align="center">
   <img src="docs/status-icon.png" alt="Status icon states: all healthy, needs attention, and notch pill" width="680">
@@ -61,16 +54,6 @@ Works with your existing editor and terminal. No IDE needed, no workflow changes
 | [opencode](https://opencode.ai) | Supported | JS plugin → `cctop-hook` CLI |
 | [pi](https://github.com/badlogic/pi-mono) | Supported | TS extension → `cctop-hook` CLI |
 | [Codex CLI](https://github.com/openai/codex) | Supported | Shell hooks → `cctop-hook` CLI (requires `codex_hooks = true` feature flag) |
-
-### Themes
-
-Four color schemes inspired by beloved developer tools — each with dark and light variants.
-
-| Claude | Tokyo Night | Gruvbox | Nord |
-|:------:|:-----------:|:-------:|:----:|
-| <img src="docs/theme-claude-dark.png" width="180"> | <img src="docs/theme-tokyoNight-dark.png" width="180"> | <img src="docs/theme-gruvbox-dark.png" width="180"> | <img src="docs/theme-nord-dark.png" width="180"> |
-
-Switch themes in Settings > Appearance > Color.
 
 ## Installation
 
@@ -92,6 +75,16 @@ brew install --cask st0012/cctop/cctop
 ### Step 2: Connect your tools
 
 Follow the app's instructions to connect your tools. The app auto-detects installed tools and offers one-click plugin installation.
+
+## Themes
+
+Four color schemes inspired by beloved developer tools — each with dark and light variants.
+
+| Claude | Tokyo Night | Gruvbox | Nord |
+|:------:|:-----------:|:-------:|:----:|
+| <img src="docs/theme-claude-dark.png" width="180"> | <img src="docs/theme-tokyoNight-dark.png" width="180"> | <img src="docs/theme-gruvbox-dark.png" width="180"> | <img src="docs/theme-nord-dark.png" width="180"> |
+
+Switch themes in Settings > Appearance > Color.
 
 ## Privacy
 
