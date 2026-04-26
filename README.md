@@ -55,6 +55,20 @@ Works with your existing editor, terminal, and workflow.
 | [pi](https://github.com/badlogic/pi-mono) | Supported | TS extension → `cctop-hook` CLI |
 | [Codex CLI](https://github.com/openai/codex) | Supported | Shell hooks → `cctop-hook` CLI (requires `codex_hooks = true` feature flag) |
 
+### Supported Editors & Terminals
+
+When you click a session card (or jump via Navigate mode), cctop focuses the host app:
+
+| App | Focus level |
+|-----|-------------|
+| VS Code, Cursor, Windsurf, Zed | Opens the project (workspace file if present) |
+| iTerm2 | Targets the specific window, tab, and pane |
+| Warp, Terminal, Ghostty | Activates the app (no per-tab targeting) |
+| Other | Falls back to opening the project folder in Finder |
+
+> [!NOTE]
+> iTerm2 requires macOS Automation permission. You'll be prompted to grant it on first use.
+
 ## Installation
 
 ### Step 1: Install the app
@@ -111,18 +125,6 @@ No. The plugin calls a lightweight native binary (`cctop-hook`) on each event, w
 
 **Do I need to configure anything per project?**
 No. Once the plugin is installed, all sessions are automatically tracked. No per-project setup required.
-
-**Does it work with VS Code and Cursor?**
-Yes. Clicking a session card focuses the correct project window.
-
-**Does it work with iTerm2?**
-Yes. Clicking a session card raises the correct iTerm2 window, selects the tab, and focuses the pane — even with split panes or multiple windows.
-
-> [!NOTE]
-> Requires macOS Automation permission. You'll be prompted to grant it on first use.
-
-**Does it work with Warp or other terminals?**
-It activates the app but cannot target a specific terminal tab. You'll need to find the right tab manually.
 
 **How does cctop name sessions?**
 By default, the project directory name (e.g. `/path/to/my-app` shows as "my-app"). In Claude Code, you can rename a session with `/rename` and cctop picks that up.
