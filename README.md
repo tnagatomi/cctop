@@ -59,9 +59,9 @@ Works with your existing editor, terminal, and workflow.
 
 ### Step 1: Install the app
 
-[**Download the latest release**](https://github.com/st0012/cctop/releases/latest) — the app is signed and notarized by Apple. Open the `.dmg` and drag `cctop.app` into `/Applications/`.
+**Download:** [Apple Silicon](https://github.com/st0012/cctop/releases/latest/download/cctop-macOS-arm64.dmg) | [Intel](https://github.com/st0012/cctop/releases/latest/download/cctop-macOS-x86_64.dmg)
 
-Once installed, cctop updates itself automatically via Sparkle — you'll be prompted when a new version is available.
+Once installed, cctop updates itself automatically via Sparkle. You'll be prompted when a new version is available.
 
 <details>
 <summary>Alternative: Homebrew</summary>
