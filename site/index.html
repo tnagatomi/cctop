@@ -128,9 +128,10 @@
   .pill svg{width:14px;height:14px}
   .pill.lg{height:42px;padding:0 18px;font-size:14px;font-weight:600}
 
-  /* Hero */
-  section.hero{padding:72px 0 32px;position:relative}
-  @media (max-width: 720px){ section.hero{padding:48px 0 24px} }
+  /* Hero — keep top padding tight so the install CTAs land above the fold on
+     14"/16" MacBooks (≈800–900px viewport after browser chrome). */
+  section.hero{padding:20px 0 32px;position:relative}
+  @media (max-width: 720px){ section.hero{padding:24px 0 24px} }
 
   /* Menubar-pill signature element. This IS the cctop menubar icon (per
      docs/status-icon.png) blown up to hero scale — black pill, "cctop_"
@@ -228,7 +229,7 @@
 
   /* Sections */
   section{padding: 80px 0;position:relative}
-  @media (max-width: 720px){ section{padding: 56px 0} section.hero{padding: 40px 0 24px} }
+  @media (max-width: 720px){ section{padding: 56px 0} }
   .eyebrow{
     display:inline-flex;align-items:center;gap:8px;
     font-family:var(--mono);font-size:12px;color:var(--accent);
