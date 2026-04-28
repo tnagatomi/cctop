@@ -54,8 +54,9 @@ cctop/
 │   ├── bundle-macos.sh        # Build and bundle .app
 │   ├── sign-and-notarize.sh   # Code sign + Apple notarization
 │   ├── generate-appcast.sh    # Sparkle appcast (multi-arch)
-│   └── bump-version.sh        # Version bumper (all files incl. site/index.html)
-├── site/                # Public website (st0012.github.io/cctop)
+│   ├── bump-version.sh        # Version bumper (all files incl. site/index.html)
+│   └── render-og.sh           # Render site/og.html → site/og.png (1200x630)
+├── site/                # Public website (cctop.app)
 │   ├── index.html       # Single static page, no build step
 │   └── README.md        # Local preview + sync rules
 ├── .github/workflows/
@@ -172,9 +173,12 @@ The `{PR_MERGE_DATE}` placeholder is replaced with the actual date on merge. Eac
 
 ### Website (`site/`)
 
-The public site at https://st0012.github.io/cctop/ lives in `site/index.html` — a single static page with no build step. Pushed to master, `.github/workflows/pages.yml` uploads `site/` as the GitHub Pages artifact and deploys.
+The public site at https://cctop.app lives in `site/index.html` — a single static page with no build step. Pushed to master, `.github/workflows/pages.yml` uploads `site/` as the GitHub Pages artifact and deploys.
 
-**One-time repo setting:** GitHub repo > Settings > Pages > Source must be set to "GitHub Actions". The first run of `pages.yml` after this is set will publish the site.
+**One-time repo settings:**
+1. Settings > Pages > Source = "GitHub Actions".
+2. Settings > Pages > Custom domain = `cctop.app`. The `site/CNAME` file pins this on every deploy — without it, the artifact upload would clear the custom domain on each run.
+3. After the Let's Encrypt cert provisions, check "Enforce HTTPS". `.app` is HSTS preloaded, so HTTPS is mandatory.
 
 **Local preview:**
 ```bash
@@ -194,6 +198,18 @@ python3 -m http.server 8000 --directory site
 - Hero / install / privacy copy if the README's framing changes
 
 `site/README.md` has the same sync table for quick reference when working in the site folder.
+
+**Social preview card (`site/og.html` → `site/og.png`):**
+
+The social preview is a static HTML source rendered to a 1200×630 PNG and committed alongside it. The site's `og:image` meta tag points at `https://cctop.app/og.png`.
+
+**ALWAYS** re-run `scripts/render-og.sh` after editing `site/og.html`, and commit `site/og.png` in the same commit. Otherwise the deployed `og:image` and the source diverge — link unfurlers (Twitter, Slack, Discord) cache OG images aggressively, so a stale PNG can persist for days even after the source change ships.
+
+```bash
+scripts/render-og.sh   # writes site/og.png from site/og.html
+```
+
+The script uses Chrome headless (auto-detected on macOS, override with `CHROME_BIN=...`). It validates the output is exactly 1200×630 and exits non-zero if rendering fails. The script is also safe to re-run — it always overwrites the existing PNG.
 
 ## Supported Agents
 
