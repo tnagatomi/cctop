@@ -27,8 +27,12 @@
     --line:       rgba(192, 202, 245, 0.10);  /* fg @ 10% */
     --line-strong:rgba(192, 202, 245, 0.18);  /* fg @ 18% */
     --fg:        #c0caf5;  /* textPrimary.tokyoNight.dark */
-    --fg-mute:   #787c99;  /* textSecondary.tokyoNight.dark */
-    --fg-dim:    #565d78;  /* textDimmed.tokyoNight.dark */
+    /* Web-only: secondary/dim text is brighter than the menubar app's tokens.
+       Long-form prose at 11–13px needs ≥4.5:1 (WCAG AA); the app's #787c99/#565d78
+       hit 4.1:1 / 2.6:1 on this bg. These are still Tokyo Night-family blues. */
+    --fg-mute:   #9aa5ce;  /* ~7:1 on --bg, ~6:1 on --surface */
+    --fg-dim:    #858eaf;  /* ~5.4:1 on --bg, ~4.6:1 on --surface */
+    --idle-seg:  #565d78;  /* hp-idle bar segment — kept dim by design */
     --accent:    #ff9e64;  /* Tokyo Night orange — same as attentions.tokyoNight.dark */
     --danger:    #f7768e;  /* Tokyo Night pink/red — permissions.tokyoNight.dark */
     --status-ok: #9ece6a;  /* Tokyo Night green — greens.tokyoNight.dark */
@@ -47,10 +51,16 @@
     --mono:    'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
     --sans:    'IBM Plex Sans', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
     --serif:   'Instrument Serif', ui-serif, Georgia, serif;
+
+    --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
   }
   *{box-sizing:border-box;min-width:0}
+  html{scroll-padding-top:72px}
   html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:var(--fs-base);line-height:1.55;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;font-feature-settings:"ss01","cv11"}
-  html,body{overflow-x:hidden;max-width:100%}
+  /* overflow-x:clip prevents horizontal overflow without making html/body a
+     scroll container — overflow-x:hidden would, and that breaks the sticky
+     header (sticky elements stick within their nearest scrolling ancestor). */
+  html,body{overflow-x:clip;max-width:100%}
   img,svg,video{max-width:100%;height:auto}
   pre,code{overflow-wrap:anywhere;word-break:break-word}
   code{font-family:var(--mono)}
@@ -80,8 +90,21 @@
   footer .brand .caret{animation:none}
   @keyframes caret{50%{opacity:0}}
   nav.top-nav{display:flex;gap:26px;font-size:14px;color:var(--fg-mute);justify-self:center}
-  nav.top-nav a{white-space:nowrap}
+  nav.top-nav a{white-space:nowrap;position:relative;transition:color 180ms ease}
   nav.top-nav a:hover{color:var(--fg)}
+  /* Active-section indicator: accent underline always at full width under the
+     link, fades in/out via opacity. JS toggles .is-active via a scroll-spy. */
+  nav.top-nav a::after{
+    content:"";position:absolute;left:0;right:0;bottom:-8px;
+    height:1.5px;border-radius:2px;background:var(--accent);
+    opacity:0;
+    transition:opacity 240ms ease;
+  }
+  nav.top-nav a.is-active{color:var(--fg)}
+  nav.top-nav a.is-active::after{opacity:1}
+  @media (prefers-reduced-motion: reduce){
+    nav.top-nav a::after{transition:none}
+  }
   .top-cta{display:flex;align-items:center;gap:10px}
   @media (max-width: 1040px){ .top-inner{grid-template-columns:auto auto !important} nav.top-nav{display:none !important} }
   /* On narrow screens the GitHub pill becomes icon-only so the Download CTA
@@ -136,7 +159,7 @@
   .hp-working    { background: var(--status-ok) }
   .hp-attention  { background: var(--accent) }
   .hp-permission { background: var(--danger) }
-  .hp-idle       { background: var(--fg-dim) }
+  .hp-idle       { background: var(--idle-seg) }
 
   h1.hero-title{
     font-size: clamp(2.75rem, 8vw, 7rem);  /* ~44 → 112px */
@@ -303,6 +326,9 @@
   @media (max-width: 900px){ .install-card{grid-template-columns:1fr;padding:24px} }
   .install-card h3{margin:0 0 10px;font-size:24px;letter-spacing:-0.02em;font-weight:600}
   .install-card p{margin:0 0 18px;color:var(--fg-mute);font-size:15px;line-height:1.6}
+  /* Frame the screenshot in --bg (one step darker than the card) so the cream
+     light-theme screenshot reads as an inset screen, not a floating image. */
+  .install-card .shot-frame{background:var(--bg);border-color:var(--line-strong)}
   .install-card .small{font-family:var(--mono);font-size:12px;color:var(--fg-dim);margin-top:14px;display:block}
   .alt-install{margin-top:22px}
   .alt-install-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
@@ -339,8 +365,22 @@
     font-size:17px;font-weight:500;letter-spacing:-0.01em
   }
   .faq summary::-webkit-details-marker{display:none}
-  .faq summary::after{content:"+";font-family:var(--mono);color:var(--fg-mute);font-size:18px;transition:transform .15s;margin-left:16px}
-  .faq details[open] summary::after{content:"−"}
+  /* Single "+" that rotates 45° to "×" on open — tween-able, unlike a content swap.
+     Duration sits between body open (340ms) and close (280ms) so the chevron
+     stays roughly synced in both directions without asymmetric transition CSS. */
+  .faq summary::after{
+    content:"+";font-family:var(--mono);color:var(--fg-mute);font-size:18px;margin-left:16px;
+    display:inline-block;line-height:1;
+    transition: transform 320ms var(--ease-out), color 200ms ease;
+  }
+  .faq details[open] summary::after{transform:rotate(45deg);color:var(--accent)}
+  /* display:flow-root forces a BFC so the inner <p>'s margin-top doesn't
+     collapse outside the wrapper. Without this, scrollHeight is 12px short
+     of the actually-rendered height and the tween clips the last half-line. */
+  .faq .details-body{display:flow-root}
+  @media (prefers-reduced-motion: reduce){
+    .faq summary::after{transition:none}
+  }
   .faq p{color:var(--fg-mute);margin: 12px 0 0;font-size:15px;line-height:1.6;max-width: 70ch}
   .faq ol{color:var(--fg-mute);margin: 12px 0 0 0;padding-left: 24px;font-size:15px;line-height:1.6;max-width: 70ch}
   .faq ol li{margin: 4px 0}
@@ -353,7 +393,21 @@
   .foot-col h4{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--fg-dim);margin:0 0 10px;font-family:var(--mono);font-weight:500}
   .foot-col a{display:block;padding:4px 0;color:var(--fg-mute)}
   .foot-col a:hover{color:var(--fg)}
+
+  /* Scroll reveal — fade + 12px Y, gated by .js so no-JS visitors see content
+     immediately. Stagger via inline --rd on individual elements. */
+  .js .reveal{
+    opacity:0; transform:translateY(12px);
+    transition:
+      opacity 650ms var(--ease-out) var(--rd, 0ms),
+      transform 650ms var(--ease-out) var(--rd, 0ms);
+  }
+  .js .reveal.is-visible{opacity:1;transform:none}
+  @media (prefers-reduced-motion: reduce){
+    .js .reveal{opacity:1;transform:none;transition:none}
+  }
 </style>
+<script>document.documentElement.classList.add('js')</script>
 </head>
 <body>
 
@@ -444,9 +498,9 @@
 
 <section id="tools">
   <div class="wrap">
-    <span class="eyebrow">Compatibility</span>
-    <h2>What tools does it work with?</h2>
-    <p class="section-sub">cctop monitors your AI coding agents and jumps you back to the right editor or terminal window.</p>
+    <span class="eyebrow reveal">Compatibility</span>
+    <h2 class="reveal" style="--rd:60ms">What tools does it work with?</h2>
+    <p class="section-sub reveal" style="--rd:120ms">cctop monitors your AI coding agents and jumps you back to the right editor or terminal window.</p>
 
     <div class="tool-group">
       <div class="tool-group-head">
@@ -454,19 +508,19 @@
         <span class="tool-group-sub">Sessions tracked automatically once the plugin is installed.</span>
       </div>
       <div class="tools">
-        <a class="tool-card" href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noopener noreferrer">
+        <a class="tool-card reveal" style="--rd:0ms" href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noopener noreferrer">
           <div class="name">Claude Code <span class="arr"><svg width="12" height="12" aria-hidden="true"><use href="#i-ext"/></svg></span></div>
           <div class="conn">Anthropic's CLI agent</div>
         </a>
-        <a class="tool-card" href="https://opencode.ai" target="_blank" rel="noopener noreferrer">
+        <a class="tool-card reveal" style="--rd:60ms" href="https://opencode.ai" target="_blank" rel="noopener noreferrer">
           <div class="name">opencode <span class="arr"><svg width="12" height="12" aria-hidden="true"><use href="#i-ext"/></svg></span></div>
           <div class="conn">Open-source agent by SST</div>
         </a>
-        <a class="tool-card" href="https://github.com/badlogic/pi-mono" target="_blank" rel="noopener noreferrer">
+        <a class="tool-card reveal" style="--rd:120ms" href="https://github.com/badlogic/pi-mono" target="_blank" rel="noopener noreferrer">
           <div class="name">pi <span class="arr"><svg width="12" height="12" aria-hidden="true"><use href="#i-ext"/></svg></span></div>
           <div class="conn">Open-source agent by Mario Zechner</div>
         </a>
-        <a class="tool-card" href="https://github.com/openai/codex" target="_blank" rel="noopener noreferrer">
+        <a class="tool-card reveal" style="--rd:180ms" href="https://github.com/openai/codex" target="_blank" rel="noopener noreferrer">
           <div class="name">Codex CLI <span class="arr"><svg width="12" height="12" aria-hidden="true"><use href="#i-ext"/></svg></span></div>
           <div class="conn">OpenAI's open-source agent</div>
         </a>
@@ -478,7 +532,7 @@
         <span class="tool-group-title">Editors &amp; terminals</span>
         <span class="tool-group-sub">Click a session card to jump back to it.</span>
       </div>
-      <div class="tier-row">
+      <div class="tier-row reveal">
         <div class="tier-label">
           <strong>Targets the exact pane</strong>
           <span class="sg-note">right window, tab, and pane</span>
@@ -487,7 +541,7 @@
           <span class="chip">iTerm2</span>
         </div>
       </div>
-      <div class="tier-row">
+      <div class="tier-row reveal" style="--rd:80ms">
         <div class="tier-label">
           <strong>Opens the project</strong>
           <span class="sg-note">focuses the editor window, using the workspace file if present</span>
@@ -499,7 +553,7 @@
           <span class="chip">Zed</span>
         </div>
       </div>
-      <div class="tier-row">
+      <div class="tier-row reveal" style="--rd:160ms">
         <div class="tier-label">
           <strong>Activates the app</strong>
           <span class="sg-note">raises the app; find the tab manually</span>
@@ -517,10 +571,10 @@
 
 <section id="features">
   <div class="wrap">
-    <h2>Features</h2>
+    <h2 class="reveal">Features</h2>
 
     <div style="margin-top:56px">
-      <div class="feat-block">
+      <div class="feat-block reveal">
         <div class="row">
           <div class="feat">
             <h3>Navigate mode</h3>
@@ -539,7 +593,7 @@
         </div>
       </div>
 
-      <div class="feat-block">
+      <div class="feat-block reveal">
         <div class="row reverse">
           <div class="feat">
             <h3>Draggable panel</h3>
@@ -553,7 +607,7 @@
         </div>
       </div>
 
-      <div class="feat-block">
+      <div class="feat-block reveal">
         <div class="row">
           <div class="feat">
             <h3>Smart status icon</h3>
@@ -568,7 +622,7 @@
         </div>
       </div>
 
-      <div class="feat-block">
+      <div class="feat-block reveal">
         <div class="row reverse">
           <div class="feat">
             <h3>Recent projects</h3>
@@ -587,22 +641,22 @@
 
 <section id="themes">
   <div class="wrap">
-    <h2>Themes</h2>
-    <p class="section-sub">Four color schemes inspired by beloved developer tools — each with dark and light variants. Switch in Settings &gt; Appearance &gt; Color.</p>
+    <h2 class="reveal">Themes</h2>
+    <p class="section-sub reveal" style="--rd:60ms">Four color schemes inspired by beloved developer tools — each with dark and light variants. Switch in Settings &gt; Appearance &gt; Color.</p>
     <div class="themes">
-      <div class="theme-card">
+      <div class="theme-card reveal" style="--rd:0ms">
         <img src="https://raw.githubusercontent.com/st0012/cctop/master/docs/theme-claude-dark.png" alt="Claude theme" loading="lazy" width="640" height="750" decoding="async" />
         <div class="name"><span class="sw" style="background:#d97757"></span> Claude</div>
       </div>
-      <div class="theme-card">
+      <div class="theme-card reveal" style="--rd:60ms">
         <img src="https://raw.githubusercontent.com/st0012/cctop/master/docs/theme-tokyoNight-dark.png" alt="Tokyo Night theme" loading="lazy" width="640" height="750" decoding="async" />
         <div class="name"><span class="sw" style="background:#7aa2f7"></span> Tokyo Night</div>
       </div>
-      <div class="theme-card">
+      <div class="theme-card reveal" style="--rd:120ms">
         <img src="https://raw.githubusercontent.com/st0012/cctop/master/docs/theme-gruvbox-dark.png" alt="Gruvbox theme" loading="lazy" width="640" height="750" decoding="async" />
         <div class="name"><span class="sw" style="background:#b8bb26"></span> Gruvbox</div>
       </div>
-      <div class="theme-card">
+      <div class="theme-card reveal" style="--rd:180ms">
         <img src="https://raw.githubusercontent.com/st0012/cctop/master/docs/theme-nord-dark.png" alt="Nord theme" loading="lazy" width="640" height="750" decoding="async" />
         <div class="name"><span class="sw" style="background:#88c0d0"></span> Nord</div>
       </div>
@@ -612,10 +666,10 @@
 
 <section id="install">
   <div class="wrap">
-    <h2>Installation</h2>
-    <p class="section-sub">Download the latest release, open the .dmg, and drag cctop.app into /Applications. The app auto-updates via Sparkle.</p>
+    <h2 class="reveal">Installation</h2>
+    <p class="section-sub reveal" style="--rd:60ms">Download the latest release, open the .dmg, and drag cctop.app into /Applications. The app auto-updates via Sparkle.</p>
 
-    <div class="install-card">
+    <div class="install-card reveal" style="--rd:120ms">
       <div>
         <h3>Step 1 — Install the app</h3>
         <p>Signed and notarized by Apple. Runs on macOS 13+. <strong style="color:var(--fg)">Step 2:</strong> follow the app's instructions to connect your tools — it auto-detects what you have installed and offers one-click plugin install.</p>
@@ -657,29 +711,29 @@
 
 <section id="faq">
   <div class="wrap">
-    <h2>Common questions.</h2>
+    <h2 class="reveal">Common questions.</h2>
     <div class="faq">
-      <details open>
+      <details class="reveal" open>
         <summary>Does cctop slow down my coding tool?</summary>
         <p>No. The plugin runs a tiny native binary on each event, which writes a small JSON file and returns immediately. There is no measurable impact on performance.</p>
       </details>
-      <details>
+      <details class="reveal">
         <summary>Does cctop send any data anywhere?</summary>
         <p>No — no network access, no analytics, no telemetry. All session data stays on your machine in <code>~/.cctop/sessions/</code> as plain JSON you can inspect anytime.</p>
       </details>
-      <details>
+      <details class="reveal">
         <summary>Do I need to configure anything per project?</summary>
         <p>No. Once the plugin is installed, every session is automatically tracked. There's no per-project setup.</p>
       </details>
-      <details>
+      <details class="reveal">
         <summary>How does cctop name sessions?</summary>
         <p>By default, by the project directory name. In Claude Code, /rename gives the session a custom label and cctop picks it up.</p>
       </details>
-      <details>
+      <details class="reveal">
         <summary>Why does the app need to live in /Applications/?</summary>
         <p>Plugins look for the cctop helper inside /Applications/cctop.app or ~/.cctop/bin/. Installing elsewhere breaks the integration.</p>
       </details>
-      <details>
+      <details class="reveal">
         <summary>How do I uninstall?</summary>
         <ol>
           <li>Remove the app: <code>rm -rf /Applications/cctop.app</code></li>
@@ -724,6 +778,160 @@
 </footer>
 
 <script>
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // RAF smooth-scroll for in-page anchors at a tunable duration (the browser's
+  // built-in CSS smooth-scroll runs ~400ms with no API to slow it down).
+  (() => {
+    const SCROLL_DURATION = 900;
+    const ease = (t) => 1 - Math.pow(1 - t, 4); // ease-out-quart
+    let raf = null;
+    const cancel = () => { if (raf !== null) { cancelAnimationFrame(raf); raf = null; } };
+    function scrollTo(targetY) {
+      cancel();
+      if (reducedMotion) { window.scrollTo(0, targetY); return; }
+      const startY = window.scrollY;
+      const distance = targetY - startY;
+      if (!distance) return;
+      const t0 = performance.now();
+      const step = (now) => {
+        const t = Math.min(1, (now - t0) / SCROLL_DURATION);
+        window.scrollTo(0, startY + distance * ease(t));
+        raf = t < 1 ? requestAnimationFrame(step) : null;
+      };
+      raf = requestAnimationFrame(step);
+    }
+    // Abort the animation if the user starts scrolling manually.
+    window.addEventListener('wheel', cancel, { passive: true });
+    window.addEventListener('touchstart', cancel, { passive: true });
+
+    document.querySelectorAll('a[href^="#"]').forEach(a => {
+      a.addEventListener('click', (e) => {
+        const href = a.getAttribute('href');
+        if (!href) return;
+        let targetY = 0;
+        if (href !== '#') {
+          const target = document.querySelector(href);
+          if (!target) return;
+          const offset = parseInt(getComputedStyle(document.documentElement).scrollPaddingTop) || 0;
+          targetY = target.getBoundingClientRect().top + window.scrollY - offset;
+        }
+        e.preventDefault();
+        history.pushState(null, '', href);
+        scrollTo(targetY);
+      });
+    });
+  })();
+
+  // Top-nav active section: scroll-spy that picks the deepest section whose
+  // top has crossed the cursor (100px from viewport top, sits below the 60px
+  // sticky header + 72px scroll-padding-top). Always returns a deterministic
+  // answer once any section has been scrolled past — no band gaps.
+  (() => {
+    const links = document.querySelectorAll('nav.top-nav a[href^="#"]');
+    const targets = [];
+    links.forEach(a => {
+      const id = a.getAttribute('href');
+      if (id.length > 1) {
+        const section = document.querySelector(id);
+        if (section) targets.push({ link: a, section });
+      }
+    });
+    if (!targets.length) return;
+    const CURSOR = 100;
+    let scheduled = false;
+    function update() {
+      scheduled = false;
+      let active = null;
+      for (const { section } of targets) {
+        if (section.getBoundingClientRect().top - CURSOR <= 0) active = section;
+      }
+      targets.forEach(({ link, section }) => {
+        link.classList.toggle('is-active', section === active);
+      });
+    }
+    function onScroll() {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(update);
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll, { passive: true });
+    update();
+  })();
+
+  // FAQ smooth expand/collapse via Web Animations API.
+  (() => {
+    const easing = 'cubic-bezier(0.25,1,0.5,1)';
+    document.querySelectorAll('.faq details').forEach(d => {
+      const summary = d.querySelector('summary');
+      if (!summary) return;
+      let wrapper = d.querySelector(':scope > .details-body');
+      if (!wrapper) {
+        wrapper = document.createElement('div');
+        wrapper.className = 'details-body';
+        while (summary.nextSibling) wrapper.appendChild(summary.nextSibling);
+        d.appendChild(wrapper);
+      }
+      if (reducedMotion) return;
+
+      let anim = null;
+      let direction = null;
+      const settle = () => {
+        wrapper.style.overflow = '';
+        wrapper.style.willChange = '';
+        direction = null;
+      };
+      summary.addEventListener('click', (e) => {
+        e.preventDefault();
+        // Re-clicking mid-close should re-open, not chain another close.
+        const wantOpen = !d.open || direction === 'closing';
+        // Read current rendered height BEFORE cancelling — once cancelled the
+        // element snaps to its CSS resting size and the next tween jumps.
+        const currentH = anim ? wrapper.getBoundingClientRect().height : (d.open ? wrapper.scrollHeight : 0);
+        if (anim) anim.cancel();
+        wrapper.style.overflow = 'hidden';
+        wrapper.style.willChange = 'height';
+        if (wantOpen) {
+          if (!d.open) d.open = true;
+          direction = 'opening';
+          const target = wrapper.scrollHeight;
+          anim = wrapper.animate(
+            [{ height: currentH + 'px', opacity: currentH / target },
+             { height: target + 'px', opacity: 1 }],
+            { duration: 340, easing }
+          );
+          anim.onfinish = settle;
+        } else {
+          direction = 'closing';
+          anim = wrapper.animate(
+            [{ height: currentH + 'px', opacity: 1 },
+             { height: '0px', opacity: 0 }],
+            { duration: 280, easing }
+          );
+          anim.onfinish = () => { d.open = false; settle(); };
+        }
+      });
+    });
+  })();
+
+  (() => {
+    const els = document.querySelectorAll('.reveal');
+    if (reducedMotion || !('IntersectionObserver' in window)) {
+      els.forEach(el => el.classList.add('is-visible'));
+    } else {
+      const io = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            e.target.classList.add('is-visible');
+            io.unobserve(e.target);
+          }
+        }
+      }, { rootMargin: '0px 0px 8% 0px', threshold: 0 });
+      els.forEach(el => io.observe(el));
+    }
+  })();
+
   document.querySelectorAll('.copy[data-copy]').forEach(btn => {
     btn.addEventListener('click', async () => {
       try {
