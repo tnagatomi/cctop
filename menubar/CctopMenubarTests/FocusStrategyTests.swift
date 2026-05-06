@@ -144,10 +144,43 @@ final class FocusStrategyTests: XCTestCase {
         XCTAssertEqual(strategy, .activateByName("warp"))
     }
 
-    func testGhosttyUsesActivateByName() {
+    func testGhosttyUsesAppleScriptWithWorkingDirectory() {
         let session = makeSession(program: "Ghostty")
         let strategy = resolveFocusStrategy(session: session)
-        XCTAssertEqual(strategy, .activateByName("ghostty"))
+        XCTAssertEqual(strategy, .ghostty(workingDirectory: projectPath))
+    }
+
+    func testGhosttyDetectedByBundleIdWhenProgramDiffers() {
+        // User runs a multiplexer (e.g. tmux) inside Ghostty — TERM_PROGRAM may not
+        // say "ghostty", but __CFBundleIdentifier still does.
+        let session = makeSession(program: "tmux", bundleId: "com.mitchellh.ghostty")
+        let strategy = resolveFocusStrategy(session: session)
+        XCTAssertEqual(strategy, .ghostty(workingDirectory: projectPath))
+    }
+
+    // MARK: - AppleScript path escaping
+
+    func testGhosttyEscapesQuotesInPath() {
+        XCTAssertEqual(
+            escapeAppleScriptString(#"/Users/test/has"quote"#),
+            #"/Users/test/has\"quote"#
+        )
+    }
+
+    func testGhosttyEscapesBackslashesInPath() {
+        XCTAssertEqual(
+            escapeAppleScriptString(#"/Users/test/back\slash"#),
+            #"/Users/test/back\\slash"#
+        )
+    }
+
+    func testGhosttyEscapesBackslashesBeforeQuotes() {
+        // Backslashes must be escaped first; otherwise the second pass would
+        // re-escape the backslashes we just inserted to escape quotes.
+        XCTAssertEqual(
+            escapeAppleScriptString(#"a\b"c"#),
+            #"a\\b\"c"#
+        )
     }
 
     func testAppleTerminalUsesActivateByName() {

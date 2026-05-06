@@ -21,6 +21,33 @@ function isValidGUID(s: string): boolean {
   return /^[0-9a-fA-F-]+$/.test(s);
 }
 
+/** Escape a string for safe interpolation inside an AppleScript double-quoted literal. */
+function escapeAppleScriptString(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+/**
+ * Build the AppleScript to focus a Ghostty terminal whose working directory matches.
+ * Mirrors executeGhosttyFocusScript() in FocusTerminal.swift.
+ *
+ * Best-effort: Ghostty does not yet expose a per-surface env var inside the shell
+ * (see ghostty-org/ghostty#9084, #10603), so we cannot do an exact-id match like
+ * iTerm2/Kitty. When GHOSTTY_SURFACE_ID ships, switch to id-based matching.
+ */
+function buildGhosttyScript(workingDirectory: string): string {
+  const escaped = escapeAppleScriptString(workingDirectory);
+  return `
+    tell application "Ghostty"
+      activate
+      set matches to (every terminal whose working directory is "${escaped}")
+      if (count of matches) > 0 then
+        focus (item 1 of matches)
+        return
+      end if
+    end tell
+  `;
+}
+
 /**
  * Build the AppleScript to focus a specific iTerm2 session by GUID.
  * Matches the AppleScript in FocusTerminal.swift:focusITerm2Session().
@@ -75,7 +102,14 @@ export function getTerminalLabel(session: CctopSession): string {
 export async function jumpToSession(session: CctopSession): Promise<void> {
   try {
     const program = session.terminal?.program?.toLowerCase() ?? "";
+    const bundleId = session.terminal?.bundle_id ?? "";
     const target = session.workspace_file ?? session.project_path;
+
+    // Bundle ID is more reliable than TERM_PROGRAM: when a multiplexer (tmux,
+    // zellij) runs inside Ghostty, TERM_PROGRAM becomes the multiplexer name
+    // while __CFBundleIdentifier still identifies the host emulator. Mirrors
+    // HostApp.from(bundleIdentifier:) in the Swift menubar app.
+    const isGhostty = program.includes("ghostty") || bundleId === "com.mitchellh.ghostty";
 
     if (
       program.includes("code") ||
@@ -96,8 +130,14 @@ export async function jumpToSession(session: CctopSession): Promise<void> {
       }
     } else if (program.includes("warp")) {
       execFileSync("open", ["-a", "Warp"]);
-    } else if (program.includes("ghostty")) {
-      execFileSync("open", ["-a", "Ghostty"]);
+    } else if (isGhostty) {
+      // Ghostty 1.3.0+ exposes AppleScript; match the terminal by working directory
+      // and fall back to plain activation if no terminal matches or the script errors.
+      try {
+        execFileSync("osascript", ["-e", buildGhosttyScript(session.project_path)]);
+      } catch {
+        execFileSync("open", ["-a", "Ghostty"]);
+      }
     } else if (session.terminal?.program) {
       // Generic terminal: try activating the app by name first (matches Swift's activateAppByName)
       try {
