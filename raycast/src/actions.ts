@@ -1,5 +1,7 @@
 // Jump-to-session action logic, replicating FocusTerminal.swift behavior
 import { execFileSync } from "child_process";
+import { statSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { closeMainWindow, popToRoot } from "@raycast/api";
 import { showFailureToast } from "@raycast/utils";
 import { CctopSession } from "./types";
@@ -24,6 +26,29 @@ function isValidGUID(s: string): boolean {
 /** Escape a string for safe interpolation inside an AppleScript double-quoted literal. */
 function escapeAppleScriptString(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+/**
+ * Bytes written to the slave (`/dev/ttysNNN`) appear on the PTY master where Ghostty
+ * parses them; the shell does not see them. Best-effort — silently no-ops if the TTY
+ * has closed. Mirrors `primeGhosttyCWD` in FocusTerminal.swift.
+ */
+function primeGhosttyCWD(tty: string, workingDirectory: string): void {
+  try {
+    // Allow only PTY slaves (`/dev/ttys<digits>`) — that's the only shape
+    // cctop-hook captures from `ps -o tty=`. This rejects /dev/cu.*, /dev/console,
+    // and arbitrary file paths a tampered session JSON might supply.
+    if (!/^\/dev\/ttys\d+$/.test(tty)) return;
+    if (!statSync(tty).isCharacterDevice()) return;
+    // encodeURI leaves '#' and '?' unencoded; post-encode to match Swift's `.urlPathAllowed`.
+    const encoded = encodeURI(workingDirectory)
+      .replace(/#/g, "%23")
+      .replace(/\?/g, "%3F");
+    const osc = `\x1b]7;file://${hostname()}${encoded}\x07`;
+    writeFileSync(tty, osc);
+  } catch {
+    // best-effort
+  }
 }
 
 /**
@@ -122,7 +147,8 @@ export async function jumpToSession(session: CctopSession): Promise<void> {
     // zellij) runs inside Ghostty, TERM_PROGRAM becomes the multiplexer name
     // while __CFBundleIdentifier still identifies the host emulator. Mirrors
     // HostApp.from(bundleIdentifier:) in the Swift menubar app.
-    const isGhostty = program.includes("ghostty") || bundleId === "com.mitchellh.ghostty";
+    const isGhostty =
+      program.includes("ghostty") || bundleId === "com.mitchellh.ghostty";
 
     if (
       program.includes("code") ||
@@ -144,10 +170,15 @@ export async function jumpToSession(session: CctopSession): Promise<void> {
     } else if (program.includes("warp")) {
       execFileSync("open", ["-a", "Warp"]);
     } else if (isGhostty) {
-      // Ghostty 1.3.0+ exposes AppleScript; match the terminal by working directory
-      // and fall back to plain activation if no terminal matches or the script errors.
+      // Ghostty 1.3.0+ exposes AppleScript; match the terminal by working directory.
+      if (session.terminal?.tty) {
+        primeGhosttyCWD(session.terminal.tty, session.project_path);
+      }
       try {
-        execFileSync("osascript", ["-e", buildGhosttyScript(session.project_path)]);
+        execFileSync("osascript", [
+          "-e",
+          buildGhosttyScript(session.project_path),
+        ]);
       } catch {
         execFileSync("open", ["-a", "Ghostty"]);
       }

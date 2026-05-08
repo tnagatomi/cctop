@@ -101,6 +101,9 @@ func resolveMultiplexerFocus(session: Session) -> MultiplexerFocusStrategy? {
 func focusTerminal(session: Session) {
     let strategy = resolveFocusStrategy(session: session)
     let muxStrategy = resolveMultiplexerFocus(session: session)
+    if case .ghostty(let cwd) = strategy, let tty = session.terminal?.tty {
+        primeGhosttyCWD(tty: tty, workingDirectory: cwd)
+    }
     executeFocusStrategy(strategy)
     if let mux = muxStrategy {
         DispatchQueue.global(qos: .userInitiated).async {
@@ -202,6 +205,12 @@ private func executeITerm2Script(guid: String) -> Bool {
 // best-effort: ambiguous when multiple Ghostty splits share the same cwd
 // (picks first), and breaks if the user `cd`s elsewhere after session start.
 //
+// Before running the AppleScript we write an OSC 7 cwd report directly to the
+// session's TTY (captured at hook time, e.g. /dev/ttys011). Ghostty parses OSC 7
+// off the PTY master and updates `working directory of term`. This makes the
+// match deterministic even when the shell never emits OSC 7 itself (e.g. when
+// Ghostty's shell integration isn't loaded by a wrapper-launched shell).
+//
 // We walk windows → tabs → terminals (instead of `every terminal whose …`) so
 // we keep a reference to the parent window, then call `activate window` on it
 // before focusing the surface. The leading `activate` only raises whichever
@@ -220,6 +229,14 @@ private func executeITerm2Script(guid: String) -> Bool {
 func escapeAppleScriptString(_ value: String) -> String {
     value.replacingOccurrences(of: "\\", with: "\\\\")
         .replacingOccurrences(of: "\"", with: "\\\"")
+}
+
+/// Build the OSC 7 byte sequence (`ESC ] 7 ; file://HOST/PATH BEL`).
+/// Path is URL-encoded so spaces / non-ASCII don't break the URI form.
+func buildOSC7CWD(host: String, workingDirectory: String) -> String {
+    let encoded = workingDirectory
+        .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? workingDirectory
+    return "\u{1B}]7;file://\(host)\(encoded)\u{07}"
 }
 
 private func executeGhosttyFocusScript(workingDirectory: String) -> Bool {
@@ -241,6 +258,24 @@ private func executeGhosttyFocusScript(workingDirectory: String) -> Bool {
         end repeat
     end tell
     """)
+}
+
+/// Bytes written to the slave (`/dev/ttysNNN`) appear on the PTY master where Ghostty
+/// parses them; the shell does not see them. Best-effort — silently no-ops if the TTY
+/// has closed (session just ended).
+private func primeGhosttyCWD(tty: String, workingDirectory: String) {
+    // Allow only PTY slaves (`/dev/ttys<digits>`) — that's the only shape
+    // cctop-hook captures from `ps -o tty=`. This rejects /dev/cu.*, /dev/console,
+    // and arbitrary file paths a tampered session JSON might supply.
+    guard tty.range(of: #"^/dev/ttys\d+$"#, options: .regularExpression) != nil else { return }
+    guard let attrs = try? FileManager.default.attributesOfItem(atPath: tty),
+          (attrs[.type] as? FileAttributeType) == .typeCharacterSpecial else { return }
+    let host = ProcessInfo.processInfo.hostName
+    let osc = buildOSC7CWD(host: host, workingDirectory: workingDirectory)
+    guard let data = osc.data(using: .utf8) else { return }
+    guard let handle = FileHandle(forWritingAtPath: tty) else { return }
+    defer { try? handle.close() }
+    try? handle.write(contentsOf: data)
 }
 
 // MARK: - Kitty Remote Control
