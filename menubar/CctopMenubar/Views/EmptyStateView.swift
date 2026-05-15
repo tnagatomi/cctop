@@ -2,12 +2,8 @@ import SwiftUI
 
 struct EmptyStateView: View {
     @ObservedObject var pluginManager: PluginManager
-    @State private var copiedIndex: Int?
     @State private var justInstalledOC = false
     @State private var justInstalledPi = false
-
-    private static let ccMarketplace = "claude plugin marketplace add st0012/cctop"
-    private static let ccInstall = "claude plugin install cctop"
 
     private var anyInstalled: Bool {
         pluginManager.ccInstalled || pluginManager.ocInstalled
@@ -150,8 +146,10 @@ struct EmptyStateView: View {
         VStack(spacing: 12) {
             VStack(spacing: 6) {
                 sectionHeader("Claude Code")
-                commandRow(Self.ccMarketplace, index: 1)
-                commandRow(Self.ccInstall, index: 2)
+                HStack {
+                    Spacer()
+                    ClaudeCodeInstallButton()
+                }
             }
 
             if pluginManager.ocConfigExists {
@@ -179,37 +177,6 @@ struct EmptyStateView: View {
                 .foregroundStyle(Color.textSecondary)
             Spacer()
         }
-    }
-
-    private func commandRow(_ command: String, index: Int) -> some View {
-        HStack(spacing: 6) {
-            Text(command)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(Color.textSecondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-
-            Spacer(minLength: 0)
-
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(command, forType: .string)
-                copiedIndex = index
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                    if copiedIndex == index { copiedIndex = nil }
-                }
-            } label: {
-                Image(systemName: copiedIndex == index ? "checkmark" : "doc.on.doc")
-                    .font(.system(size: 10))
-                    .foregroundStyle(copiedIndex == index ? .green : Color.textSecondary)
-                    .frame(width: 20, height: 20)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(Color.textPrimary.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
     private func stepRow(text: String) -> some View {

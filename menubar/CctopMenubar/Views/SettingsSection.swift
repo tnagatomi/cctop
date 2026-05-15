@@ -256,7 +256,7 @@ private struct MonitoredToolsView: View {
     @Binding var installFailed: Bool
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            toolStatusRow(name: "Claude Code", installed: pluginManager.ccInstalled)
+            ClaudeCodePluginRowView(pluginManager: pluginManager)
             if pluginManager.ocConfigExists {
                 PluginRowView(name: "opencode", installed: pluginManager.ocInstalled,
                     needsUpdate: pluginManager.ocNeedsUpdate, installFailed: $installFailed,
@@ -273,14 +273,6 @@ private struct MonitoredToolsView: View {
             }
         }
         .padding(.horizontal, 14).padding(.bottom, 8)
-    }
-    private func toolStatusRow(name: String, installed: Bool) -> some View {
-        HStack(spacing: 8) {
-            Text(name).font(.system(size: 11, weight: .medium)).foregroundStyle(Color.textPrimary)
-            Spacer()
-            if installed { ConnectedBadge()
-            } else { Text("Not installed").font(.system(size: 10)).foregroundStyle(Color.textMuted) }
-        }.padding(.vertical, 7)
     }
 }
 
@@ -346,6 +338,74 @@ private struct PluginRowView: View {
     }
 }
 
+private struct ClaudeCodePluginRowView: View {
+    @ObservedObject var pluginManager: PluginManager
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("Claude Code")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.textPrimary)
+            Spacer()
+            if pluginManager.ccInstalled {
+                ConnectedBadge()
+            } else {
+                ClaudeCodeInstallButton()
+            }
+        }
+        .padding(.vertical, 7)
+    }
+}
+
+/// Amber "Copy Install Command" button that flips to a green confirmation pill for 2s on click.
+/// Shared by the Settings row and the empty-state install prompt.
+struct ClaudeCodeInstallButton: View {
+    @State private var justCopied = false
+
+    var body: some View {
+        if justCopied {
+            copiedPill
+        } else {
+            copyButton
+        }
+    }
+
+    private var copyButton: some View {
+        Button {
+            NSPasteboard.copyToClipboard(PluginManager.ccInstallCommand)
+            justCopied = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                justCopied = false
+            }
+        } label: {
+            Text("Copy Install Command")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.segmentActiveText)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Color.amber)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var copiedPill: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "checkmark")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(Color.statusGreen)
+            Text("Copied \u{2014} paste in terminal")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.statusGreen)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(Color.statusGreen, lineWidth: 1)
+        )
+        .transition(.opacity)
+    }
+}
+
 private struct CodexPluginRowView: View {
     @ObservedObject var pluginManager: PluginManager
     @Binding var installFailed: Bool
@@ -386,6 +446,21 @@ private struct ConnectedBadge: View {
     } }
 }
 // MARK: - Previews
+@MainActor private func previewCCRow(installed: Bool) -> PluginManager {
+    let pm = PluginManager()
+    pm.ccInstalled = installed
+    return pm
+}
+
+#Preview("CC row - Not installed") {
+    ClaudeCodePluginRowView(pluginManager: previewCCRow(installed: false))
+        .frame(width: 320).padding()
+}
+#Preview("CC row - Connected") {
+    ClaudeCodePluginRowView(pluginManager: previewCCRow(installed: true))
+        .frame(width: 320).padding()
+}
+
 @MainActor private class MockUpdater: UpdaterBase { override var canCheckForUpdates: Bool { true } }
 @MainActor private func previewPM() -> PluginManager {
     let pm = PluginManager(); pm.ccInstalled = true; pm.ocInstalled = true

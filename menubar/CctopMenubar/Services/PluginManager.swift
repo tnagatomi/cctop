@@ -16,6 +16,9 @@ class PluginManager: ObservableObject {
     @Published var codexConfigExists: Bool = false
     @Published var codexFlagAlreadyEnabled: Bool = false
 
+    static let ccInstallCommand =
+        "claude plugin marketplace add st0012/cctop && claude plugin install cctop"
+
     private static let home = FileManager.default.homeDirectoryForCurrentUser
     private static let ocPluginPath = home.appendingPathComponent(
         ".config/opencode/plugins/cctop.js"
@@ -23,6 +26,11 @@ class PluginManager: ObservableObject {
     private static let piPluginPath = home.appendingPathComponent(
         ".pi/agent/extensions/cctop.ts"
     )
+    private static let ccPluginCacheDir = home.appendingPathComponent(
+        ".claude/plugins/cache/cctop/cctop"
+    )
+    static let ccOrphanedMarker = ".orphaned_at"
+    static let ccPluginManifestPath = ".claude-plugin/plugin.json"
 
     init() {
         refresh()
@@ -32,10 +40,7 @@ class PluginManager: ObservableObject {
         let fm = FileManager.default
         let home = Self.home
 
-        let ccDir = home.appendingPathComponent(".claude/plugins/cache/cctop")
-        var isDir: ObjCBool = false
-        ccInstalled = fm.fileExists(atPath: ccDir.path, isDirectory: &isDir)
-            && isDir.boolValue
+        ccInstalled = Self.hasActiveClaudeCodePluginVersion(in: Self.ccPluginCacheDir)
 
         let ocConfigDir = home.appendingPathComponent(".config/opencode")
         ocConfigExists = fm.fileExists(atPath: ocConfigDir.path)
@@ -55,6 +60,22 @@ class PluginManager: ObservableObject {
             codexFlagAlreadyEnabled = CodexPluginInstaller.isFeatureFlagEnabled(text)
         } else {
             codexFlagAlreadyEnabled = false
+        }
+    }
+
+    /// Cache layout is `<marketplace>/<plugin>/<version>/`. Claude Code writes a `.orphaned_at`
+    /// marker inside a version directory after uninstall instead of deleting the directory.
+    nonisolated static func hasActiveClaudeCodePluginVersion(in baseDir: URL) -> Bool {
+        let fm = FileManager.default
+        guard let versions = try? fm.contentsOfDirectory(atPath: baseDir.path) else {
+            return false
+        }
+        return versions.contains { version in
+            let versionDir = baseDir.appendingPathComponent(version)
+            let orphaned = versionDir.appendingPathComponent(ccOrphanedMarker)
+            let manifest = versionDir.appendingPathComponent(ccPluginManifestPath)
+            return !fm.fileExists(atPath: orphaned.path)
+                && fm.fileExists(atPath: manifest.path)
         }
     }
 
