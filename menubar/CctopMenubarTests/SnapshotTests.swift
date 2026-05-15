@@ -25,6 +25,31 @@ final class SnapshotTests: XCTestCase {
         try renderScreenshot(view: view, colorScheme: .dark, filename: "menubar-navigate.png")
     }
 
+    /// Renders the EmptyStateView in its first-run "nothing installed yet" form
+    /// — all four supported agents (Claude Code, opencode, pi, Codex CLI) detected
+    /// on the machine with their respective install CTAs — for use in the README
+    /// and marketing site. Shows the full breadth of agent support in one shot.
+    ///
+    /// Run with:
+    ///   xcodebuild test -project menubar/CctopMenubar.xcodeproj -scheme CctopMenubar \
+    ///     -only-testing:CctopMenubarTests/SnapshotTests/testGenerateEmptyStateScreenshot \
+    ///     -derivedDataPath menubar/build/ CODE_SIGN_IDENTITY="-"
+    func testGenerateEmptyStateScreenshot() throws {
+        let pm = PluginManager()
+        pm.ccInstalled = false
+        pm.ocInstalled = false
+        pm.ocConfigExists = true
+        pm.ocNeedsUpdate = false
+        pm.piInstalled = false
+        pm.piConfigExists = true
+        pm.codexInstalled = false
+        pm.codexConfigExists = true
+        pm.codexNeedsUpdate = false
+        let view = EmptyStateView(pluginManager: pm)
+        try renderScreenshot(view: view, colorScheme: .light, filename: "empty-state-light.png")
+        try renderScreenshot(view: view, colorScheme: .dark, filename: "empty-state-dark.png")
+    }
+
     func testGenerateRecentProjectsScreenshot() throws {
         let view = PopupView(
             sessions: Session.qaShowcase, recentProjects: RecentProject.mockRecents,
