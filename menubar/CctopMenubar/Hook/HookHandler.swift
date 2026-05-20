@@ -97,9 +97,24 @@ enum HookHandler {
         if let name = input.sessionName {
             session.sessionName = name
         } else if event == .sessionStart || event == .userPromptSubmit {
-            session.sessionName = SessionNameLookup.lookupSessionName(
-                transcriptPath: input.transcriptPath, sessionId: input.sessionId
-            )
+            // Only overwrite when the lookup succeeds. Previously this clobbered
+            // sessionName with nil on every UserPromptSubmit whose transcript
+            // didn't yet contain a `custom-title` entry, regressing any name set
+            // by an earlier event.
+            //
+            // Codex sessions use a different local source: `~/.codex/session_index.jsonl`
+            // — Codex Desktop writes the user-visible thread name there, keyed by session_id.
+            let lookedUp: String?
+            if session.source == "codex" {
+                lookedUp = SessionNameLookup.lookupCodexThreadName(sessionId: input.sessionId)
+            } else {
+                lookedUp = SessionNameLookup.lookupSessionName(
+                    transcriptPath: input.transcriptPath, sessionId: input.sessionId
+                )
+            }
+            if let name = lookedUp {
+                session.sessionName = name
+            }
         }
         return (oldStatus, newStatus)
     }
@@ -167,9 +182,17 @@ enum HookHandler {
            abs(storedStart - currentStart) > 1.0 {
             return fresh
         }
-        // Same process but CC assigned a new session_id (e.g. resume) — carry over state
+        // Same PID, different session_id — the OS process is now hosting a new
+        // conversation. Common for Codex Desktop, which keeps one long-lived
+        // process and spawns a new session_id per "new chat". Drop all
+        // conversation-specific state (project, name, prompt, tools, etc.) and
+        // only carry over PID liveness metadata so the process-alive check
+        // keeps working.
         guard existing.sessionId == fresh.sessionId else {
-            return existing.withSessionId(fresh.sessionId, branch: fresh.branch, terminal: fresh.terminal)
+            var carried = fresh
+            carried.pid = existing.pid
+            carried.pidStartTime = existing.pidStartTime
+            return carried
         }
         return existing
     }
