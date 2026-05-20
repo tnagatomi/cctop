@@ -136,32 +136,69 @@ extension Session {
         .mock(id: "1", project: "solo-project", branch: "main", status: .working, lastTool: "Task", lastToolDetail: "Running tests"),
     ]
 
-    /// Showcase sessions for README screenshots — diverse projects, mixed sources.
-    static let qaShowcase: [Session] = [
-        .mock(id: "1", project: "cctop", branch: "main",
-              status: .waitingPermission,
-              notificationMessage: "Allow Bash: npm test"),
-        .mock(id: "2", project: "my-app", branch: "feature/auth",
-              sessionName: "refactor auth flow",
-              status: .working, lastTool: "Edit",
-              lastToolDetail: "/src/auth.ts",
-              activeSubagents: [
-                  SubagentInfo(agentId: "a1", agentType: "Explore", startedAt: Date()),
-                  SubagentInfo(agentId: "a2", agentType: "Explore", startedAt: Date()),
-                  SubagentInfo(agentId: "a3", agentType: "Plan", startedAt: Date()),
-              ]),
-        .mock(id: "3", project: "api-server", branch: "fix/timeout",
-              status: .working, lastTool: "bash",
-              lastToolDetail: "go test ./...",
-              source: "opencode"),
-        .mock(id: "4", project: "web-app", branch: "main",
-              status: .waitingInput,
-              lastPrompt: "Should I also update the retry logic?",
-              source: "opencode"),
-        .mock(id: "5", project: "terraform-infra", branch: "main",
-              status: .working, lastTool: "Bash",
-              lastToolDetail: "terraform plan -out=tfplan",
-              source: "codex"),
-        .mock(id: "6", project: "docs", branch: "main", status: .idle),
-    ]
+    /// Showcase sessions for README screenshots — diverse projects, mixed sources,
+    /// covers all 4 distinct agent badge variants (CC, Claude Desktop, Codex, Codex Desktop)
+    /// and both attention pills (Permission + Waiting). Permission sorts above
+    /// waitingInput, so the top card always shows the dedicated red-orange "Permission"
+    /// pill alongside its italic notification note.
+    static let qaShowcase: [Session] = {
+        // Top of list — waitingPermission sorts above everything else.
+        // Demos the dedicated "Permission" pill + italic permission note.
+        var s1 = mock(
+            id: "1", project: "cctop", branch: "redesign",
+            sessionName: "Verify migration safety",
+            status: .waitingPermission,
+            notificationMessage: "Allow Bash: rm -rf node_modules",
+            source: "cc"
+        )
+        s1.lastActivity = Date().addingTimeInterval(-10) // "10s ago"
+
+        // waitingInput sits just under permission. Codex Desktop placed here so
+        // the pulsing amber "Waiting" pill is paired with the most distinctive
+        // Desktop badge.
+        var s2 = mock(
+            id: "2", project: "billing-api", branch: "main",
+            sessionName: "Investigate staging deploy regression",
+            status: .waitingInput,
+            lastPrompt: "Should we retry on 5xx or surface to the user?",
+            terminal: TerminalInfo(bundleId: "com.openai.codex"),
+            source: "codex"
+        )
+        s2.lastActivity = Date().addingTimeInterval(-180) // "3m ago"
+
+        var s3 = mock(
+            id: "3", project: "cctop", branch: "main",
+            sessionName: "Review session card redesign",
+            status: .working, lastTool: "Read",
+            lastToolDetail: "/src/SessionCardView.swift",
+            source: "cc"
+        )
+        // s3.lastActivity is Date() → "just now"
+
+        var s4 = mock(
+            id: "4", project: "infra-tools", branch: "main",
+            sessionName: "Trace flaky integration test",
+            status: .working, lastTool: "Bash",
+            lastToolDetail: "./scripts/run-integration-tests.sh --filter staging",
+            terminal: TerminalInfo(bundleId: "com.anthropic.claudefordesktop"),
+            source: nil
+        )
+        s4.lastActivity = Date().addingTimeInterval(-30) // "30s ago"
+
+        // lastTool: "local_shell" matches what Codex actually emits (its only
+        // tool-tracked event). formatToolDisplay routes "local_shell" through
+        // the same "Running: ..." rendering as "bash".
+        var s5 = mock(
+            id: "5", project: "deploy-pipeline", branch: "main",
+            status: .working, lastTool: "local_shell",
+            lastToolDetail: "./scripts/deploy.sh --plan staging",
+            source: "codex"
+        )
+        s5.lastActivity = Date().addingTimeInterval(-300) // "5m ago"
+
+        var s6 = mock(id: "6", project: "cctop", branch: "master", status: .idle, source: "cc")
+        s6.lastActivity = Date().addingTimeInterval(-1_296_000) // "15d ago"
+
+        return [s1, s2, s3, s4, s5, s6]
+    }()
 }
