@@ -39,6 +39,16 @@ enum Config {
             .appendingPathComponent("Library/Application Support/Claude/claude-code-sessions")
     }
 
+    /// Codex's local memory folder. Read-only — never created.
+    static func codexMemoriesDir() -> String {
+        if let override = ProcessInfo.processInfo.environment["CCTOP_CODEX_MEMORIES_DIR"],
+           !override.isEmpty {
+            return override
+        }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return (home as NSString).appendingPathComponent(".codex/memories")
+    }
+
     /// Codex's session index (JSONL), which maps `id` (session_id) to the
     /// user-visible `thread_name`. Read-only — never created.
     static func codexSessionIndexPath() -> String {
@@ -49,6 +59,10 @@ enum Config {
         return NSString(string: "~/.codex/session_index.jsonl").expandingTildeInPath
     }
 
+    static func standardizedPath(_ path: String) -> String {
+        NSString(string: NSString(string: path).expandingTildeInPath).standardizingPath
+    }
+
     private static func ensureDirectoryExists(_ path: String) {
         let fm = FileManager.default
         if !fm.fileExists(atPath: path) {
@@ -57,5 +71,33 @@ enum Config {
                 attributes: [.posixPermissions: 0o700]
             )
         }
+    }
+}
+
+extension Session {
+    private static let codexDesktopBundleID = "com.openai.codex"
+    private static let codexTitleGenerationPromptPrefix =
+        "You are a helpful assistant. You will be presented with a user prompt, and your job is to provide a short title"
+
+    /// True for Codex Desktop's local memory-consolidation runs. These are maintenance
+    /// artifacts, not user workspace sessions, so cctop marks their live files hidden.
+    var isCodexMemoryMaintenanceSession: Bool {
+        source == Session.codexSource
+            && terminal?.bundleId == Self.codexDesktopBundleID
+            && Config.standardizedPath(projectPath) == Config.standardizedPath(Config.codexMemoriesDir())
+    }
+
+    /// True for Codex Desktop's internal title-generation helper runs. They briefly create
+    /// hook-visible conversations in the current project, but are not user workspace sessions.
+    var isCodexDesktopTitleGenerationSession: Bool {
+        source == Session.codexSource
+            && terminal?.bundleId == Self.codexDesktopBundleID
+            && (sessionName?.isEmpty ?? true)
+            && (lastPrompt?.hasPrefix(Self.codexTitleGenerationPromptPrefix) == true)
+            && (lastPrompt?.contains("Generate a concise UI title") == true)
+    }
+
+    var shouldAutoHide: Bool {
+        isCodexMemoryMaintenanceSession || isCodexDesktopTitleGenerationSession
     }
 }
