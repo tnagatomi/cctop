@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Foundation
 
 private let maxToolDetailLen = 120
@@ -96,6 +97,10 @@ enum HookHandler {
         // Skip lastActivity for notificationPermission — PermissionRequest already set it,
         // and the menubar app needs the original timestamp for child-process-start-time comparison.
         if event != .notificationPermission { session.lastActivity = Date() }
+        if Transition.clearsInactiveMarkers(event: event) {
+            session.endedAt = nil
+            session.disconnectedAt = nil
+        }
         session.branch = branch; session.terminal = terminal
         // MIGRATION(harness_name): The session JSON file still uses the `source` key.
         // Renaming the JSON key would require a reader-side migration in SessionManager.
@@ -335,6 +340,9 @@ enum HookHandler {
         return "/dev/" + String(cString: name)
     }
 
+}
+
+extension HookHandler {
     // MARK: - Cleanup
 
     private static func handleSessionEnd(hookName: String, input: HookInput) {
@@ -345,7 +353,11 @@ enum HookHandler {
         // Stamp endedAt instead of deleting — the menubar app archives to history on next poll.
         try? withSessionLock(sessionPath: path) {
             if var session = try? Session.fromFile(path: path) {
-                session.endedAt = Date()
+                let endedAt = Date()
+                session.endedAt = endedAt
+                if isDesktopBundleId(session.terminal?.bundleId) {
+                    session.disconnectedAt = session.disconnectedAt ?? endedAt
+                }
                 try? session.writeToFile(path: path)
                 HookLogger.appendHookLog(sessionId: safeId, event: hookName, label: label, transition: "-> ended")
             } else {
@@ -358,6 +370,11 @@ enum HookHandler {
     static func cleanupSessionsForProject(sessionsDir: String, projectPath: String, currentPid: UInt32?) {
         forEachSession(in: sessionsDir) { path, session in
             guard session.projectPath == projectPath, session.pid != currentPid else { return }
+
+            // Desktop-app conversations survive host-app restarts as dormant cards in the menubar
+            // app and are reaped only by its lock-held GC. The hook must NOT delete them here, or
+            // resuming one conversation would reap its dormant same-project siblings.
+            guard !isDesktopBundleId(session.terminal?.bundleId) else { return }
 
             let isStale: Bool
             if let pid = session.pid {
@@ -381,6 +398,10 @@ enum HookHandler {
         }
     }
 
+    private static func isDesktopBundleId(_ bundleId: String?) -> Bool {
+        bundleId == HostAppBundleID.claudeDesktop || bundleId == HostAppBundleID.codexDesktop
+    }
+
     private static func forEachSession(in dir: String, body: (String, Session) -> Void) {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { return }
@@ -393,7 +414,7 @@ enum HookHandler {
 
     private static func removeSession(at path: String, sessionId: String) {
         try? FileManager.default.removeItem(atPath: path)
-        try? FileManager.default.removeItem(atPath: path + ".lock")
+        // Never remove the .lock here: unlinking a held lock splits the flock inode.
         HookLogger.cleanupSessionLog(sessionId: sessionId)
     }
 
@@ -429,11 +450,8 @@ func withSessionLock(sessionPath: String, body: () throws -> Void) throws {
 
 // MARK: - Session File Naming
 
-/// Session files are keyed by PID, except Codex. Codex Desktop fires every
-/// conversation's hooks from one shared host process, so PID keying would collapse
-/// them into a single slot — key Codex by session_id so each conversation is its own
-/// file. The `codex-` prefix keeps the name non-UUID so the menubar's legacy-file
-/// cleanup (which deletes bare pre-PID UUID files) leaves it alone.
+/// Session files are keyed by PID, except Codex where one host process can emit hooks
+/// for multiple conversations. The `codex-` prefix avoids legacy UUID-file cleanup.
 func sessionFileName(input: HookInput, pid: UInt32, safeSessionId: String) -> String {
     if input.resolvedHarnessName == Session.codexSource {
         return "codex-\(safeSessionId).json"
@@ -467,7 +485,6 @@ func getCurrentBranch(cwd: String) -> String {
 }
 
 // MARK: - Tool Detail Extraction
-
 func extractToolDetail(toolName: String, toolInput: [String: String]?) -> String? {
     guard let toolInput else { return nil }
 

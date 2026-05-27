@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Foundation
 
 // MARK: - Shared date formatting
@@ -147,6 +148,17 @@ struct SubagentInfo: Codable, Equatable {
     }
 }
 
+/// Display-only lifecycle of a session, derived on each load and never persisted (a new
+/// persisted `SessionStatus` would decode to `.working` on older app builds). Orthogonal to
+/// `SessionStatus`: a dormant card keeps its last-known status for context but is excluded
+/// from attention counts and notifications. The raw value is the dedup preference rank
+/// (lower = preferred): active beats dormant beats finished.
+enum SessionLifecycle: Int, Equatable {
+    case active = 0    // backing process alive, or (Codex Desktop) recent hook activity
+    case dormant = 1   // process gone, but the conversation is recent and may resume
+    case finished = 2  // ended or aged out → eligible for GC
+}
+
 struct Session: Codable, Identifiable, Equatable {
     let sessionId: String
     let projectPath: String
@@ -166,8 +178,16 @@ struct Session: Codable, Identifiable, Equatable {
     var workspaceFile: String?
     var source: String?
     var endedAt: Date?
+    var disconnectedAt: Date?
     var activeSubagents: [SubagentInfo]?
     var hidden: Bool
+
+    /// Display-only lifecycle, derived on each load. Deliberately NOT in `CodingKeys`, so the
+    /// synthesized `Codable` skips it and decode defaults it to `.active` (never persisted —
+    /// a persisted lifecycle would decode to `.working` on older builds via SessionStatus).
+    /// It IS a stored property, so it joins synthesized `Equatable` — a dormant flip changes
+    /// equality and re-renders.
+    var lifecycle: SessionLifecycle = .active
 
     /// Harness id Codex reports (CLI and Desktop both pass `--harness codex`).
     static let codexSource = "codex"
@@ -207,6 +227,7 @@ struct Session: Codable, Identifiable, Equatable {
         case workspaceFile = "workspace_file"
         case source
         case endedAt = "ended_at"
+        case disconnectedAt = "disconnected_at"
         case activeSubagents = "active_subagents"
         case hidden
     }
@@ -233,6 +254,7 @@ struct Session: Codable, Identifiable, Equatable {
         workspaceFile = try container.decodeIfPresent(String.self, forKey: .workspaceFile)
         source = try container.decodeIfPresent(String.self, forKey: .source)
         endedAt = try container.decodeIfPresent(Date.self, forKey: .endedAt)
+        disconnectedAt = try container.decodeIfPresent(Date.self, forKey: .disconnectedAt)
         activeSubagents = try container.decodeIfPresent([SubagentInfo].self, forKey: .activeSubagents)
         hidden = try container.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
     }
@@ -257,6 +279,7 @@ struct Session: Codable, Identifiable, Equatable {
         workspaceFile: String? = nil,
         source: String? = nil,
         endedAt: Date? = nil,
+        disconnectedAt: Date? = nil,
         activeSubagents: [SubagentInfo]? = nil,
         hidden: Bool = false
     ) {
@@ -278,6 +301,7 @@ struct Session: Codable, Identifiable, Equatable {
         self.workspaceFile = workspaceFile
         self.source = source
         self.endedAt = endedAt
+        self.disconnectedAt = disconnectedAt
         self.activeSubagents = activeSubagents
         self.hidden = hidden
     }
@@ -302,6 +326,7 @@ struct Session: Codable, Identifiable, Equatable {
         self.workspaceFile = nil
         self.source = nil
         self.endedAt = nil
+        self.disconnectedAt = nil
         self.activeSubagents = nil
         self.hidden = false
     }
@@ -367,6 +392,7 @@ struct Session: Codable, Identifiable, Equatable {
             workspaceFile: workspaceFile,
             source: source,
             endedAt: endedAt,
+            disconnectedAt: disconnectedAt,
             activeSubagents: activeSubagents,
             hidden: hidden
         )
@@ -399,8 +425,10 @@ struct Session: Codable, Identifiable, Equatable {
     }
 
     static func sorted(_ sessions: [Session]) -> [Session] {
+        // Live (active) sessions first, then dormant; within each tier by status, then recency.
         sessions.sorted {
-            ($0.status.sortOrder, $1.lastActivity) < ($1.status.sortOrder, $0.lastActivity)
+            ($0.lifecycle.rawValue, $0.status.sortOrder, $1.lastActivity)
+                < ($1.lifecycle.rawValue, $1.status.sortOrder, $0.lastActivity)
         }
     }
 
@@ -408,9 +436,9 @@ struct Session: Codable, Identifiable, Equatable {
         URL(fileURLWithPath: path).lastPathComponent
     }
 
-    /// The best available end-of-session timestamp: `endedAt` if archived, otherwise `lastActivity`.
+    /// The best available inactive timestamp for ordering retained files.
     var effectiveEndDate: Date {
-        endedAt ?? lastActivity
+        disconnectedAt ?? endedAt ?? lastActivity
     }
 
     var relativeTime: String {

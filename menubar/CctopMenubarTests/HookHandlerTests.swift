@@ -221,6 +221,82 @@ final class HookHandlerTests: XCTestCase {
         XCTAssertNotNil(try loadSession().endedAt)
     }
 
+    func testDesktopSessionEndStampsDisconnectedAt() throws {
+        setenv("__CFBundleIdentifier", HostAppBundleID.claudeDesktop, 1)
+        defer { unsetenv("__CFBundleIdentifier") }
+
+        try handleFixture("SessionStart")
+        XCTAssertNil(try loadSession().disconnectedAt)
+
+        try handleFixture("SessionEnd")
+
+        let session = try loadSession()
+        XCTAssertNotNil(session.endedAt)
+        XCTAssertNotNil(session.disconnectedAt)
+    }
+
+    func testSessionStartClearsEndedAndDisconnectedAt() throws {
+        setenv("__CFBundleIdentifier", HostAppBundleID.claudeDesktop, 1)
+        defer { unsetenv("__CFBundleIdentifier") }
+
+        try handleFixture("SessionStart")
+        try handleFixture("SessionEnd")
+        XCTAssertNotNil(try loadSession().endedAt)
+        XCTAssertNotNil(try loadSession().disconnectedAt)
+
+        try handleFixture("SessionStart")
+
+        let session = try loadSession()
+        XCTAssertNil(session.endedAt)
+        XCTAssertNil(session.disconnectedAt)
+    }
+
+    func testNoOpHooksPreserveEndedAndDisconnectedAt() throws {
+        setenv("__CFBundleIdentifier", HostAppBundleID.claudeDesktop, 1)
+        defer { unsetenv("__CFBundleIdentifier") }
+
+        try handleFixture("SessionStart")
+        try handleFixture("SessionEnd")
+        let endedAt = try XCTUnwrap(try loadSession().endedAt)
+        let disconnectedAt = try XCTUnwrap(try loadSession().disconnectedAt)
+
+        try handleFixture("Notification-permission", hookName: "Notification")
+        XCTAssertEqual(try loadSession().endedAt, endedAt)
+        XCTAssertEqual(try loadSession().disconnectedAt, disconnectedAt)
+
+        try handleHook("""
+        {"session_id":"test-session-001","cwd":"/tmp/test-project","hook_event_name":"Notification","notification_type":"future_type"}
+        """, hookName: "Notification")
+        XCTAssertEqual(try loadSession().endedAt, endedAt)
+        XCTAssertEqual(try loadSession().disconnectedAt, disconnectedAt)
+
+        try handleFixture("SessionStart", hookName: "FutureHook")
+        XCTAssertEqual(try loadSession().endedAt, endedAt)
+        XCTAssertEqual(try loadSession().disconnectedAt, disconnectedAt)
+    }
+
+    func testSubagentHooksPreserveEndedAndDisconnectedAt() throws {
+        setenv("__CFBundleIdentifier", HostAppBundleID.claudeDesktop, 1)
+        defer { unsetenv("__CFBundleIdentifier") }
+
+        try handleFixture("SessionStart")
+        try handleFixture("SessionEnd")
+        let endedAt = try XCTUnwrap(try loadSession().endedAt)
+        let disconnectedAt = try XCTUnwrap(try loadSession().disconnectedAt)
+
+        try handleFixture("SubagentStart")
+        var session = try loadSession()
+        XCTAssertEqual(session.endedAt, endedAt)
+        XCTAssertEqual(session.disconnectedAt, disconnectedAt)
+        XCTAssertEqual(session.activeSubagents?.count, 1)
+
+        try handleFixture("SubagentStop")
+        session = try loadSession()
+        XCTAssertEqual(session.endedAt, endedAt)
+        XCTAssertEqual(session.disconnectedAt, disconnectedAt)
+        XCTAssertEqual(session.activeSubagents?.count, 0)
+    }
+
     // MARK: - Source passthrough (opencode)
 
     func testSourcePassthrough() throws {
@@ -452,5 +528,10 @@ final class HookHandlerTests: XCTestCase {
     private func jsonString(_ value: String) throws -> String {
         let data = try JSONEncoder().encode(value)
         return String(decoding: data, as: UTF8.self)
+    }
+
+    private func handleHook(_ json: String, hookName: String) throws {
+        let input = try JSONDecoder().decode(HookInput.self, from: Data(json.utf8))
+        try HookHandler.handleHook(hookName: hookName, input: input)
     }
 }

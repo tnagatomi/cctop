@@ -255,4 +255,52 @@ final class ForkSessionTests: XCTestCase {
             XCTAssertTrue(pidExists(hookPID))
         }
     }
+
+    // MARK: - Desktop sessions are protected from hook cleanup
+
+    // Resuming one desktop conversation must NOT reap its dormant same-project siblings; the
+    // menubar app's lock-held GC owns desktop removal. Dead terminal siblings are still reaped.
+    func testCleanupSkipsDesktopAppSessionsButReapsDeadTerminal() throws {
+        let project = "/tmp/cctop-gate-\(UUID().uuidString)"
+        // PIDs above macOS PID_MAX (99999) can never be live → deterministically "dead".
+        var desktop = Session(sessionId: "desk-1", projectPath: project, branch: "main",
+                              terminal: TerminalInfo(bundleId: HostAppBundleID.claudeDesktop))
+        desktop.pid = 999_999
+        let desktopPath = sessionsDir + "999999.json"
+        try desktop.writeToFile(path: desktopPath)
+
+        var term = Session(sessionId: "term-1", projectPath: project, branch: "main",
+                           terminal: TerminalInfo(bundleId: "com.googlecode.iterm2"))
+        term.pid = 999_998
+        let termPath = sessionsDir + "999998.json"
+        try term.writeToFile(path: termPath)
+
+        HookHandler.cleanupSessionsForProject(
+            sessionsDir: sessionsDir, projectPath: project, currentPid: UInt32(getpid())
+        )
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: desktopPath),
+                      "Desktop-app session must survive project cleanup (kept as a dormant card)")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: termPath),
+                       "Dead terminal session should still be reaped")
+    }
+
+    func testCleanupLeavesLockFileWhenRemovingDeadTerminalSession() throws {
+        let project = "/tmp/cctop-lock-\(UUID().uuidString)"
+        let deadPID: UInt32 = 999_997
+        var term = Session(sessionId: "term-lock", projectPath: project, branch: "main",
+                           terminal: TerminalInfo(bundleId: "com.googlecode.iterm2"))
+        term.pid = deadPID
+        let termPath = sessionsDir + "\(deadPID).json"
+        let lockPath = termPath + ".lock"
+        try term.writeToFile(path: termPath)
+        FileManager.default.createFile(atPath: lockPath, contents: Data())
+
+        HookHandler.cleanupSessionsForProject(
+            sessionsDir: sessionsDir, projectPath: project, currentPid: UInt32(getpid())
+        )
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: termPath))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: lockPath))
+    }
 }
