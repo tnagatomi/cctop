@@ -2,6 +2,32 @@ import XCTest
 @testable import CctopMenubar
 
 final class SessionFileFormatTests: XCTestCase {
+    private func writeCodexStateDatabase(path: String, archivedThreads: Set<String>) throws {
+        let archivedRows = archivedThreads.map {
+            """
+            INSERT INTO threads (id, archived) VALUES ('\($0)', 1);
+            """
+        }.joined(separator: "\n")
+        let sql = """
+        DROP TABLE IF EXISTS threads;
+        CREATE TABLE threads (
+            id TEXT PRIMARY KEY,
+            archived INTEGER NOT NULL DEFAULT 0
+        );
+        \(archivedRows)
+        """
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        process.arguments = [path]
+        let stdin = Pipe()
+        process.standardInput = stdin
+        try process.run()
+        stdin.fileHandleForWriting.write(Data(sql.utf8))
+        try stdin.fileHandleForWriting.close()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+    }
+
     private func codexDesktopSession(sessionId: String, projectPath: String) -> Session {
         var session = Session(
             sessionId: sessionId,
@@ -13,6 +39,42 @@ final class SessionFileFormatTests: XCTestCase {
         session.pid = UInt32(ProcessInfo.processInfo.processIdentifier)
         session.status = .waitingInput
         return session
+    }
+
+    private func claudeDesktopSession(sessionId: String, projectPath: String) -> Session {
+        var session = Session(
+            sessionId: sessionId,
+            projectPath: projectPath,
+            branch: "main",
+            terminal: TerminalInfo(bundleId: HostAppBundleID.claudeDesktop)
+        )
+        session.source = "cc"
+        session.pid = UInt32(ProcessInfo.processInfo.processIdentifier)
+        session.status = .waitingInput
+        return session
+    }
+
+    private func writeClaudeDesktopSessionMetadata(
+        root: String,
+        cliSessionId: String,
+        isArchived: Bool,
+        lastActivityAt: Any? = nil
+    ) throws {
+        let sessionDir = (root as NSString).appendingPathComponent("account/project")
+        try FileManager.default.createDirectory(atPath: sessionDir, withIntermediateDirectories: true)
+        let metadataPath = (sessionDir as NSString)
+            .appendingPathComponent("local_\(UUID().uuidString).json")
+        var payload: [String: Any] = [
+            "sessionId": "local_\(UUID().uuidString)",
+            "cliSessionId": cliSessionId,
+            "isArchived": isArchived,
+            "title": "Archived Claude Session"
+        ]
+        if let lastActivityAt {
+            payload["lastActivityAt"] = lastActivityAt
+        }
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        try data.write(to: URL(fileURLWithPath: metadataPath))
     }
 
     private func codexTitleGenerationPrompt(for userPrompt: String = "Why do I have several memories sessions?") -> String {
@@ -481,6 +543,466 @@ final class SessionFileFormatTests: XCTestCase {
         manager = nil
     }
 
+    @MainActor
+    func testSessionManagerHidesArchivedCodexDesktopSessionButKeepsFileForUnarchive() throws {
+        let root = NSTemporaryDirectory() + "cctop-codex-archived-\(UUID().uuidString)"
+        let sessionsDir = (root as NSString).appendingPathComponent("sessions")
+        let historyDir = (root as NSString).appendingPathComponent("history")
+        let stateDB = (root as NSString).appendingPathComponent("state_5.sqlite")
+        try FileManager.default.createDirectory(atPath: sessionsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: historyDir, withIntermediateDirectories: true)
+        try writeCodexStateDatabase(path: stateDB, archivedThreads: ["archived-thread"])
+
+        setenv("CCTOP_SESSIONS_DIR", sessionsDir, 1)
+        setenv("CCTOP_CODEX_STATE_DB", stateDB, 1)
+        defer {
+            unsetenv("CCTOP_SESSIONS_DIR")
+            unsetenv("CCTOP_CODEX_STATE_DB")
+            try? FileManager.default.removeItem(atPath: root)
+        }
+
+        let sessionPath = (sessionsDir as NSString).appendingPathComponent("codex-archived-thread.json")
+        var session = codexDesktopSession(sessionId: "archived-thread", projectPath: "/tmp/p")
+        session.lastActivity = Date()
+        try session.writeToFile(path: sessionPath)
+
+        var manager: SessionManager? = SessionManager(
+            historyManager: HistoryManager(historyDir: URL(fileURLWithPath: historyDir))
+        )
+        manager?.loadSessions()
+
+        XCTAssertEqual(manager?.sessions.map(\.sessionId), [])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sessionPath))
+        XCTAssertFalse(try Session.fromFile(path: sessionPath).hidden)
+        XCTAssertTrue((try FileManager.default.contentsOfDirectory(atPath: historyDir)).isEmpty)
+
+        try writeCodexStateDatabase(path: stateDB, archivedThreads: [])
+        manager?.loadSessions()
+
+        XCTAssertEqual(manager?.sessions.map(\.sessionId), ["archived-thread"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sessionPath))
+
+        manager = nil
+    }
+
+    @MainActor
+    func testSessionManagerHidesArchivedCodexDesktopSessionWhenSourceIsMissing() throws {
+        let root = NSTemporaryDirectory() + "cctop-codex-archived-missing-source-\(UUID().uuidString)"
+        let sessionsDir = (root as NSString).appendingPathComponent("sessions")
+        let historyDir = (root as NSString).appendingPathComponent("history")
+        let stateDB = (root as NSString).appendingPathComponent("state_5.sqlite")
+        try FileManager.default.createDirectory(atPath: sessionsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: historyDir, withIntermediateDirectories: true)
+        try writeCodexStateDatabase(path: stateDB, archivedThreads: ["archived-without-source"])
+
+        setenv("CCTOP_SESSIONS_DIR", sessionsDir, 1)
+        setenv("CCTOP_CODEX_STATE_DB", stateDB, 1)
+        defer {
+            unsetenv("CCTOP_SESSIONS_DIR")
+            unsetenv("CCTOP_CODEX_STATE_DB")
+            try? FileManager.default.removeItem(atPath: root)
+        }
+
+        let sessionPath = (sessionsDir as NSString).appendingPathComponent("codex-archived-without-source.json")
+        var session = codexDesktopSession(sessionId: "archived-without-source", projectPath: "/tmp/p")
+        session.source = nil
+        session.lastActivity = Date()
+        try session.writeToFile(path: sessionPath)
+
+        var manager: SessionManager? = SessionManager(
+            historyManager: HistoryManager(historyDir: URL(fileURLWithPath: historyDir))
+        )
+        manager?.loadSessions()
+
+        XCTAssertEqual(manager?.sessions.map(\.sessionId), [])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sessionPath))
+        XCTAssertFalse(try Session.fromFile(path: sessionPath).hidden)
+        XCTAssertTrue((try FileManager.default.contentsOfDirectory(atPath: historyDir)).isEmpty)
+
+        try writeCodexStateDatabase(path: stateDB, archivedThreads: [])
+        manager?.loadSessions()
+
+        XCTAssertEqual(manager?.sessions.map(\.sessionId), ["archived-without-source"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sessionPath))
+
+        manager = nil
+    }
+
+    @MainActor
+    func testSessionManagerHidesArchivedClaudeDesktopSessionButKeepsFileForUnarchive() throws {
+        let root = NSTemporaryDirectory() + "cctop-claude-archived-\(UUID().uuidString)"
+        let sessionsDir = (root as NSString).appendingPathComponent("sessions")
+        let historyDir = (root as NSString).appendingPathComponent("history")
+        let claudeDir = (root as NSString).appendingPathComponent("claude-code-sessions")
+        try FileManager.default.createDirectory(atPath: sessionsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: historyDir, withIntermediateDirectories: true)
+        try writeClaudeDesktopSessionMetadata(
+            root: claudeDir,
+            cliSessionId: "archived-claude-session",
+            isArchived: true
+        )
+
+        setenv("CCTOP_SESSIONS_DIR", sessionsDir, 1)
+        setenv("CCTOP_CLAUDE_CODE_SESSIONS_DIR", claudeDir, 1)
+        defer {
+            unsetenv("CCTOP_SESSIONS_DIR")
+            unsetenv("CCTOP_CLAUDE_CODE_SESSIONS_DIR")
+            try? FileManager.default.removeItem(atPath: root)
+        }
+
+        let sessionPath = (sessionsDir as NSString).appendingPathComponent("archived-claude-session.json")
+        var session = claudeDesktopSession(sessionId: "archived-claude-session", projectPath: "/tmp/p")
+        session.lastActivity = Date()
+        try session.writeToFile(path: sessionPath)
+
+        var manager: SessionManager? = SessionManager(
+            historyManager: HistoryManager(historyDir: URL(fileURLWithPath: historyDir))
+        )
+        manager?.loadSessions()
+
+        XCTAssertEqual(manager?.sessions.map(\.sessionId), [])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sessionPath))
+        XCTAssertFalse(try Session.fromFile(path: sessionPath).hidden)
+        XCTAssertTrue((try FileManager.default.contentsOfDirectory(atPath: historyDir)).isEmpty)
+
+        try FileManager.default.removeItem(atPath: claudeDir)
+        try writeClaudeDesktopSessionMetadata(
+            root: claudeDir,
+            cliSessionId: "archived-claude-session",
+            isArchived: false
+        )
+        manager?.loadSessions()
+
+        XCTAssertEqual(manager?.sessions.map(\.sessionId), ["archived-claude-session"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sessionPath))
+
+        manager = nil
+    }
+
+    @MainActor
+    func testSessionManagerHidesArchivedClaudeDesktopSessionWhenSourceIsMissing() throws {
+        let root = NSTemporaryDirectory() + "cctop-claude-archived-missing-source-\(UUID().uuidString)"
+        let sessionsDir = (root as NSString).appendingPathComponent("sessions")
+        let historyDir = (root as NSString).appendingPathComponent("history")
+        let claudeDir = (root as NSString).appendingPathComponent("claude-code-sessions")
+        try FileManager.default.createDirectory(atPath: sessionsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: historyDir, withIntermediateDirectories: true)
+        try writeClaudeDesktopSessionMetadata(
+            root: claudeDir,
+            cliSessionId: "archived-claude-without-source",
+            isArchived: true
+        )
+
+        setenv("CCTOP_SESSIONS_DIR", sessionsDir, 1)
+        setenv("CCTOP_CLAUDE_CODE_SESSIONS_DIR", claudeDir, 1)
+        defer {
+            unsetenv("CCTOP_SESSIONS_DIR")
+            unsetenv("CCTOP_CLAUDE_CODE_SESSIONS_DIR")
+            try? FileManager.default.removeItem(atPath: root)
+        }
+
+        let sessionPath = (sessionsDir as NSString).appendingPathComponent("archived-claude-without-source.json")
+        var session = claudeDesktopSession(sessionId: "archived-claude-without-source", projectPath: "/tmp/p")
+        session.source = nil
+        session.lastActivity = Date()
+        try session.writeToFile(path: sessionPath)
+
+        var manager: SessionManager? = SessionManager(
+            historyManager: HistoryManager(historyDir: URL(fileURLWithPath: historyDir))
+        )
+        manager?.loadSessions()
+
+        XCTAssertEqual(manager?.sessions.map(\.sessionId), [])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sessionPath))
+        XCTAssertFalse(try Session.fromFile(path: sessionPath).hidden)
+        XCTAssertTrue((try FileManager.default.contentsOfDirectory(atPath: historyDir)).isEmpty)
+
+        manager = nil
+    }
+
+    // The GC deletion decision must read live Codex archive state on every call, not a snapshot,
+    // so a thread archived between a GC scan and its delete keeps its file. Calling the helper
+    // twice across a DB change proves it never caches.
+    func testIsCodexDesktopThreadArchivedReadsLiveState() throws {
+        let root = NSTemporaryDirectory() + "cctop-codex-archived-live-\(UUID().uuidString)"
+        let stateDB = (root as NSString).appendingPathComponent("state_5.sqlite")
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        setenv("CCTOP_CODEX_STATE_DB", stateDB, 1)
+        defer {
+            unsetenv("CCTOP_CODEX_STATE_DB")
+            try? FileManager.default.removeItem(atPath: root)
+        }
+
+        let session = codexDesktopSession(sessionId: "live-thread", projectPath: "/tmp/p")
+
+        try writeCodexStateDatabase(path: stateDB, archivedThreads: ["live-thread"])
+        XCTAssertTrue(SessionManager.isCodexDesktopThreadArchived(session))
+
+        try writeCodexStateDatabase(path: stateDB, archivedThreads: [])
+        XCTAssertFalse(SessionManager.isCodexDesktopThreadArchived(session))
+    }
+
+    // The archive check is gated on the Codex Desktop bundle ID, so a non-Codex-Desktop session
+    // sharing an archived thread ID is never treated as archived (and stays on the normal GC path).
+    func testIsCodexDesktopThreadArchivedIgnoresNonCodexDesktopHosts() throws {
+        let root = NSTemporaryDirectory() + "cctop-codex-archived-host-\(UUID().uuidString)"
+        let stateDB = (root as NSString).appendingPathComponent("state_5.sqlite")
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        try writeCodexStateDatabase(path: stateDB, archivedThreads: ["shared-id"])
+        setenv("CCTOP_CODEX_STATE_DB", stateDB, 1)
+        defer {
+            unsetenv("CCTOP_CODEX_STATE_DB")
+            try? FileManager.default.removeItem(atPath: root)
+        }
+
+        // A real terminal host (iTerm) running Codex CLI, whose session_id collides with an
+        // archived Desktop thread id: it must NOT be treated as archived, because the gate keys on
+        // the Codex Desktop bundle id — not on source, and not on a bare nil bundle id that would
+        // short-circuit before the lookup even runs.
+        var terminalSession = Session(
+            sessionId: "shared-id", projectPath: "/tmp/p", branch: "main",
+            terminal: TerminalInfo(bundleId: "com.googlecode.iterm2")
+        )
+        terminalSession.source = Session.codexSource
+        XCTAssertFalse(SessionManager.isCodexDesktopThreadArchived(terminalSession))
+    }
+
+    // The Claude archive check is also gated on the Claude Desktop bundle ID. A terminal Claude
+    // Code session sharing an archived Desktop cliSessionId must stay on the normal lifecycle path.
+    func testIsClaudeDesktopSessionArchivedIgnoresNonClaudeDesktopHosts() throws {
+        let root = NSTemporaryDirectory() + "cctop-claude-archived-host-\(UUID().uuidString)"
+        let claudeDir = (root as NSString).appendingPathComponent("claude-code-sessions")
+        try writeClaudeDesktopSessionMetadata(root: claudeDir, cliSessionId: "shared-id", isArchived: true)
+        setenv("CCTOP_CLAUDE_CODE_SESSIONS_DIR", claudeDir, 1)
+        defer {
+            unsetenv("CCTOP_CLAUDE_CODE_SESSIONS_DIR")
+            try? FileManager.default.removeItem(atPath: root)
+        }
+
+        var terminalSession = Session(
+            sessionId: "shared-id", projectPath: "/tmp/p", branch: "main",
+            terminal: TerminalInfo(bundleId: "com.googlecode.iterm2")
+        )
+        terminalSession.source = "cc"
+        XCTAssertFalse(SessionManager.isClaudeDesktopSessionArchived(terminalSession))
+    }
+
+    // GC keeps a finished Codex Desktop file while its thread is archived, then reaps it once the
+    // thread is unarchived — proving GC consults live archive state at the deletion decision.
+    @MainActor
+    func testGarbageCollectRespectsLiveCodexArchiveState() throws {
+        let root = NSTemporaryDirectory() + "cctop-codex-archived-gc-\(UUID().uuidString)"
+        let sessionsDir = (root as NSString).appendingPathComponent("sessions")
+        let historyDir = (root as NSString).appendingPathComponent("history")
+        let stateDB = (root as NSString).appendingPathComponent("state_5.sqlite")
+        try FileManager.default.createDirectory(atPath: sessionsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: historyDir, withIntermediateDirectories: true)
+
+        setenv("CCTOP_SESSIONS_DIR", sessionsDir, 1)
+        setenv("CCTOP_CODEX_STATE_DB", stateDB, 1)
+        defer {
+            unsetenv("CCTOP_SESSIONS_DIR")
+            unsetenv("CCTOP_CODEX_STATE_DB")
+            try? FileManager.default.removeItem(atPath: root)
+        }
+
+        // Aged past the dormant retention window → finished lifecycle, so GC would normally reap it.
+        let old = Date(timeIntervalSinceNow: -SessionManager.lifecycleWindows.retention - 86_400)
+        let sessionPath = (sessionsDir as NSString).appendingPathComponent("codex-finished-thread.json")
+        var session = codexDesktopSession(sessionId: "finished-thread", projectPath: "/tmp/p")
+        session.lastActivity = old
+        session.disconnectedAt = old
+        try session.writeToFile(path: sessionPath)
+
+        var manager: SessionManager? = SessionManager(
+            historyManager: HistoryManager(historyDir: URL(fileURLWithPath: historyDir))
+        )
+
+        try writeCodexStateDatabase(path: stateDB, archivedThreads: ["finished-thread"])
+        manager?.garbageCollectFinished()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sessionPath))
+
+        try writeCodexStateDatabase(path: stateDB, archivedThreads: [])
+        manager?.garbageCollectFinished()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sessionPath))
+
+        manager = nil
+    }
+
+    // GC keeps a finished Claude Desktop file while its session metadata is archived, then reaps
+    // it once the session is unarchived.
+    @MainActor
+    func testGarbageCollectRespectsLiveClaudeArchiveState() throws {
+        let root = NSTemporaryDirectory() + "cctop-claude-archived-gc-\(UUID().uuidString)"
+        let sessionsDir = (root as NSString).appendingPathComponent("sessions")
+        let historyDir = (root as NSString).appendingPathComponent("history")
+        let claudeDir = (root as NSString).appendingPathComponent("claude-code-sessions")
+        try FileManager.default.createDirectory(atPath: sessionsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: historyDir, withIntermediateDirectories: true)
+
+        setenv("CCTOP_SESSIONS_DIR", sessionsDir, 1)
+        setenv("CCTOP_CLAUDE_CODE_SESSIONS_DIR", claudeDir, 1)
+        defer {
+            unsetenv("CCTOP_SESSIONS_DIR")
+            unsetenv("CCTOP_CLAUDE_CODE_SESSIONS_DIR")
+            try? FileManager.default.removeItem(atPath: root)
+        }
+
+        let old = Date(timeIntervalSinceNow: -SessionManager.lifecycleWindows.retention - 86_400)
+        let sessionPath = (sessionsDir as NSString).appendingPathComponent("finished-claude-session.json")
+        var session = claudeDesktopSession(sessionId: "finished-claude-session", projectPath: "/tmp/p")
+        session.lastActivity = old
+        session.disconnectedAt = old
+        try session.writeToFile(path: sessionPath)
+
+        var manager: SessionManager? = SessionManager(
+            historyManager: HistoryManager(historyDir: URL(fileURLWithPath: historyDir))
+        )
+
+        try writeClaudeDesktopSessionMetadata(
+            root: claudeDir,
+            cliSessionId: "finished-claude-session",
+            isArchived: true
+        )
+        manager?.garbageCollectFinished()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sessionPath))
+
+        try FileManager.default.removeItem(atPath: claudeDir)
+        try writeClaudeDesktopSessionMetadata(
+            root: claudeDir,
+            cliSessionId: "finished-claude-session",
+            isArchived: false
+        )
+        manager?.garbageCollectFinished()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sessionPath))
+
+        manager = nil
+    }
+
+    // A missing DB means "no Codex state ⇒ nothing archived" → empty set (deletable). A DB that
+    // exists but cannot be parsed means "unknown" → nil, which the GC path must treat as keep.
+    func testArchivedThreadIDsDistinguishesMissingFromUnreadable() throws {
+        let root = NSTemporaryDirectory() + "cctop-codex-lookup-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: root) }
+
+        let missing = (root as NSString).appendingPathComponent("missing.sqlite")
+        XCTAssertEqual(CodexThreadArchiveLookup(stateDatabasePath: missing).archivedThreadIDs(matching: ["x"]), [])
+
+        let corrupt = (root as NSString).appendingPathComponent("corrupt.sqlite")
+        try Data("this is not a sqlite database".utf8).write(to: URL(fileURLWithPath: corrupt))
+        XCTAssertNil(CodexThreadArchiveLookup(stateDatabasePath: corrupt).archivedThreadIDs(matching: ["x"]))
+    }
+
+    func testArchivedClaudeSessionIDsDistinguishesMissingFromUnreadable() throws {
+        let root = NSTemporaryDirectory() + "cctop-claude-lookup-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: root) }
+
+        let missing = (root as NSString).appendingPathComponent("missing")
+        XCTAssertEqual(
+            ClaudeDesktopSessionArchiveLookup(sessionsDirectory: missing).archivedSessionIDs(matching: ["x"]),
+            []
+        )
+
+        let corruptDir = (root as NSString).appendingPathComponent("corrupt")
+        try FileManager.default.createDirectory(atPath: corruptDir, withIntermediateDirectories: true)
+        let corrupt = (corruptDir as NSString).appendingPathComponent("local_corrupt.json")
+        try Data(#"{"cliSessionId":"x","isArchived":"not-a-boolean"}"#.utf8)
+            .write(to: URL(fileURLWithPath: corrupt))
+        XCTAssertNil(
+            ClaudeDesktopSessionArchiveLookup(sessionsDirectory: corruptDir)
+                .archivedSessionIDs(matching: ["x"])
+        )
+    }
+
+    func testArchivedClaudeSessionIDsAcceptsNumericTimestamps() throws {
+        let root = NSTemporaryDirectory() + "cctop-claude-numeric-lookup-\(UUID().uuidString)"
+        let claudeDir = (root as NSString).appendingPathComponent("claude-code-sessions")
+        try writeClaudeDesktopSessionMetadata(
+            root: claudeDir,
+            cliSessionId: "numeric-timestamp-session",
+            isArchived: true,
+            lastActivityAt: 1_779_281_104_333
+        )
+        defer { try? FileManager.default.removeItem(atPath: root) }
+
+        XCTAssertEqual(
+            ClaudeDesktopSessionArchiveLookup(sessionsDirectory: claudeDir)
+                .archivedSessionIDs(matching: ["numeric-timestamp-session"]),
+            ["numeric-timestamp-session"]
+        )
+    }
+
+    func testArchivedClaudeSessionIDsUsesNewestNumericTimestamp() throws {
+        let root = NSTemporaryDirectory() + "cctop-claude-numeric-order-\(UUID().uuidString)"
+        let claudeDir = (root as NSString).appendingPathComponent("claude-code-sessions")
+        try writeClaudeDesktopSessionMetadata(
+            root: claudeDir,
+            cliSessionId: "numeric-order-session",
+            isArchived: false,
+            lastActivityAt: 99
+        )
+        try writeClaudeDesktopSessionMetadata(
+            root: claudeDir,
+            cliSessionId: "numeric-order-session",
+            isArchived: true,
+            lastActivityAt: 1_000
+        )
+        defer { try? FileManager.default.removeItem(atPath: root) }
+
+        XCTAssertEqual(
+            ClaudeDesktopSessionArchiveLookup(sessionsDirectory: claudeDir)
+                .archivedSessionIDs(matching: ["numeric-order-session"]),
+            ["numeric-order-session"]
+        )
+    }
+
+    // Blocker #1: when the archive DB exists but cannot be read, GC must NOT delete a finished
+    // Codex Desktop file — failing open here would permanently destroy a session the user archived.
+    @MainActor
+    func testGarbageCollectKeepsFinishedCodexDesktopFileWhenArchiveDbUnreadable() throws {
+        let root = NSTemporaryDirectory() + "cctop-codex-gc-unreadable-\(UUID().uuidString)"
+        let sessionsDir = (root as NSString).appendingPathComponent("sessions")
+        let historyDir = (root as NSString).appendingPathComponent("history")
+        let stateDB = (root as NSString).appendingPathComponent("state_5.sqlite")
+        try FileManager.default.createDirectory(atPath: sessionsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: historyDir, withIntermediateDirectories: true)
+
+        setenv("CCTOP_SESSIONS_DIR", sessionsDir, 1)
+        setenv("CCTOP_CODEX_STATE_DB", stateDB, 1)
+        defer {
+            unsetenv("CCTOP_SESSIONS_DIR")
+            unsetenv("CCTOP_CODEX_STATE_DB")
+            try? FileManager.default.removeItem(atPath: root)
+        }
+
+        // Aged past retention → finished lifecycle, so GC would reap it absent the archive guard.
+        let old = Date(timeIntervalSinceNow: -SessionManager.lifecycleWindows.retention - 86_400)
+        let sessionPath = (sessionsDir as NSString).appendingPathComponent("codex-finished-thread.json")
+        var session = codexDesktopSession(sessionId: "finished-thread", projectPath: "/tmp/p")
+        session.lastActivity = old
+        session.disconnectedAt = old
+        try session.writeToFile(path: sessionPath)
+
+        // DB present but unparseable → lookup returns nil → GC fails safe and keeps the file.
+        try Data("not a database".utf8).write(to: URL(fileURLWithPath: stateDB))
+        var manager: SessionManager? = SessionManager(
+            historyManager: HistoryManager(historyDir: URL(fileURLWithPath: historyDir))
+        )
+        manager?.garbageCollectFinished()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sessionPath))
+
+        // Once the DB is readable and shows the thread is not archived, GC reaps it. (Remove the
+        // corrupt bytes first — sqlite3 cannot DROP/CREATE over a non-database file.)
+        try FileManager.default.removeItem(atPath: stateDB)
+        try writeCodexStateDatabase(path: stateDB, archivedThreads: [])
+        manager?.garbageCollectFinished()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sessionPath))
+
+        manager = nil
+    }
+
     // Distinct conversations never collapse.
     func testDedupDifferentSessionIdsStaySeparate() {
         let one = candidate(sessionId: "conv-1", pid: 1, bundleId: Self.desktopBundle, lifecycleRank: 0)
@@ -650,5 +1172,19 @@ final class SessionFileFormatTests: XCTestCase {
     // carve-out applies ONLY to Codex Desktop (hostClass == .desktop), not to ambiguous.
     func testLifecycleAmbiguousCodexWithLivePidStaysActive() {
         XCTAssertEqual(life(lifeSession(source: "codex", agoSeconds: 600), .ambiguous, alive: true), .active)
+    }
+
+    // Blocker #2: a Codex Desktop session with source == nil (pre-harness-migration files) must still
+    // get the shared-PID recency carve-out via its trusted bundle id — not fall back to raw PID liveness.
+    func testLifecycleCodexDesktopWithoutSourceUsesRecency() {
+        var stale = lifeSession(agoSeconds: 600)   // source nil, stale activity
+        stale.terminal = TerminalInfo(bundleId: HostAppBundleID.codexDesktop)
+        // A live SHARED host PID must not keep a stale conversation active.
+        XCTAssertEqual(life(stale, .desktop, alive: true), .dormant)
+
+        var recent = lifeSession(agoSeconds: 30)   // source nil, recent activity
+        recent.terminal = TerminalInfo(bundleId: HostAppBundleID.codexDesktop)
+        // Recent activity means active even with a dead/irrelevant PID.
+        XCTAssertEqual(life(recent, .desktop, alive: false), .active)
     }
 }

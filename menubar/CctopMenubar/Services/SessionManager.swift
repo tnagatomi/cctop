@@ -64,26 +64,26 @@ class SessionManager: ObservableObject {
             .filter { !$0.session.hidden && !$0.session.shouldAutoHide }
             .map(\.url)
         let candidates = Self.buildCandidates(visibleFiles, now: Date())
+        let archivedCodexThreadIDs = Self.archivedCodexDesktopThreadIDs(in: candidates.map(\.session))
+        let archivedClaudeSessionIDs = Self.archivedClaudeDesktopSessionIDs(in: candidates.map(\.session))
+        let liveCandidates = candidates.filter {
+            !Self.isArchivedCodexDesktopSession($0.session, archivedThreadIDs: archivedCodexThreadIDs)
+                && !Self.isArchivedClaudeDesktopSession($0.session, archivedSessionIDs: archivedClaudeSessionIDs)
+        }
         logger.info("loadSessions: \(jsonFiles.count) files, \(allDecoded.count) decoded")
         logger.info(
-            "loadSessions: \(candidates.count) visible candidates, \(hidden.count) hidden, \(autoHidden.count) auto-hidden"
+            "loadSessions: \(liveCandidates.count) visible candidates, \(hidden.count) hidden, \(autoHidden.count) auto-hidden"
         )
+        logger.info("loadSessions: \(archivedCodexThreadIDs.count) codex-archived")
+        logger.info("loadSessions: \(archivedClaudeSessionIDs.count) claude-archived")
 
         // Publish active + dormant; finished are hidden (swept below / by GC).
-        let winners = SessionIdentityPolicy.dedupedCandidatesByStableKey(candidates)
+        let winners = SessionIdentityPolicy.dedupedCandidatesByStableKey(liveCandidates)
         let newSessions = winners
             .filter { $0.session.lifecycle != .finished }
             .map { adjustDisplayStatus($0.session) }
 
-        // Notifications: only a LIVE (active) session that NEWLY needs attention. Dormant never notifies.
-        if UserDefaults.standard.bool(forKey: "notificationsEnabled") {
-            for session in newSessions where session.lifecycle == .active {
-                guard session.status.needsAttention,
-                      let oldStatus = oldStatuses[SessionIdentityPolicy.stableKey(for: session)],
-                      !oldStatus.needsAttention else { continue }
-                sendNotification(for: session)
-            }
-        }
+        sendTransitionNotifications(for: newSessions, oldStatuses: oldStatuses)
         // Only publish when data actually changed to avoid unnecessary SwiftUI re-renders.
         if newSessions != sessions {
             if newSessions.count != sessions.count {
@@ -93,13 +93,24 @@ class SessionManager: ObservableObject {
         }
 
         hideAutoHiddenSessions(autoHidden)
-        stampDisconnectedDesktopSessions(candidates, now: Date())
+        stampDisconnectedDesktopSessions(liveCandidates, now: Date())
 
         // Non-desktop finished sessions keep today's behavior: archive to Recent Projects and
         // remove now (no Recent-Projects lag). Desktop files are retained while dormant and reaped
         // only by the slow, lock-held GC. No dormant file is ever deleted on this fast path.
-        archiveAndRemoveFinishedNonDesktop(candidates, winners: winners)
+        archiveAndRemoveFinishedNonDesktop(liveCandidates, winners: winners)
         historyManager.rebuildRecentProjects(excludingActive: Set(sessions.map(\.projectPath)))
+    }
+
+    private func sendTransitionNotifications(for newSessions: [Session], oldStatuses: [String: SessionStatus]) {
+        // Notifications: only a LIVE (active) session that NEWLY needs attention. Dormant never notifies.
+        guard UserDefaults.standard.bool(forKey: "notificationsEnabled") else { return }
+        for session in newSessions where session.lifecycle == .active {
+            guard session.status.needsAttention,
+                  let oldStatus = oldStatuses[SessionIdentityPolicy.stableKey(for: session)],
+                  !oldStatus.needsAttention else { continue }
+            sendNotification(for: session)
+        }
     }
 
     private func decodedSessions(from jsonFiles: [URL]) -> [SessionFile] {
@@ -198,12 +209,13 @@ class SessionManager: ObservableObject {
     /// Pass 2: reap finished desktop files (non-desktop is handled on the fast path). Acquires
     /// the per-session lock, re-validates under it, and unlinks the `.json` ONLY (never the `.lock`).
     /// A decode failure is never treated as finished. Also sweeps pre-PID legacy files.
-    private func garbageCollectFinished() {
+    func garbageCollectFinished() {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: sessionsDir, includingPropertiesForKeys: nil) else { return }
         let now = Date()
+        let jsonFiles = files.filter { $0.pathExtension == "json" && !$0.lastPathComponent.hasSuffix(".tmp") }
         var removedAny = false
-        for url in files where url.pathExtension == "json" && !url.lastPathComponent.hasSuffix(".tmp") {
+        for url in jsonFiles {
             if Self.isLegacyUUIDFilename(url.deletingPathExtension().lastPathComponent) {
                 try? fm.removeItem(at: url)   // pre-PID legacy file; no live writer to race
                 continue
@@ -221,6 +233,9 @@ class SessionManager: ObservableObject {
                     now: now, windows: Self.lifecycleWindows
                 )
                 guard life == .finished else { return }
+                // Re-read external desktop archive state under the lock, right before deleting. A session
+                // archived after the directory scan must keep its .json so a later unarchive can restore it.
+                guard !Self.isArchivedDesktopSession(session) else { return }
                 try? fm.removeItem(at: url)   // .json ONLY — never the .lock
                 removedAny = true
             }
