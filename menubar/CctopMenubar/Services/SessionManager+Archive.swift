@@ -16,6 +16,7 @@ struct DesktopAppConnectionLookup {
 struct SessionVisibilitySnapshot {
     let archivedCodexThreadIDs: Set<String>
     let codexSubagentThreadIDs: Set<String>
+    let codexExecHelperThreadIDs: Set<String>
     let archivedClaudeSessionIDs: Set<String>
     let codexSubagentCandidates: [DedupCandidate]
     let liveCandidates: [DedupCandidate]
@@ -26,6 +27,7 @@ extension SessionManager {
         let sessions = candidates.map(\.session)
         let archivedCodexThreadIDs = archivedCodexDesktopThreadIDs(in: sessions)
         let codexSubagentThreadIDs = codexSubagentThreadIDs(in: sessions)
+        let codexExecHelperThreadIDs = codexExecHelperThreadIDs(in: sessions)
         let claudeMetadata = claudeDesktopMetadataSnapshot(in: sessions)
         let archivedClaudeSessionIDs = claudeMetadata?.archivedSessionIDs ?? []
         let codexSubagentCandidates = candidates.filter {
@@ -34,12 +36,14 @@ extension SessionManager {
         let liveCandidates = candidates.filter {
             !isArchivedCodexDesktopSession($0.session, archivedThreadIDs: archivedCodexThreadIDs)
                 && !isCodexSubagentSession($0.session, subagentThreadIDs: codexSubagentThreadIDs)
+                && !isCodexExecHelperSession($0.session, execHelperThreadIDs: codexExecHelperThreadIDs)
                 && !isArchivedClaudeDesktopSession($0.session, archivedSessionIDs: archivedClaudeSessionIDs)
                 && !isOrphanedEndedClaudeDesktopSession($0.session, metadataSnapshot: claudeMetadata)
         }
         return SessionVisibilitySnapshot(
             archivedCodexThreadIDs: archivedCodexThreadIDs,
             codexSubagentThreadIDs: codexSubagentThreadIDs,
+            codexExecHelperThreadIDs: codexExecHelperThreadIDs,
             archivedClaudeSessionIDs: archivedClaudeSessionIDs,
             codexSubagentCandidates: codexSubagentCandidates,
             liveCandidates: liveCandidates
@@ -80,6 +84,24 @@ extension SessionManager {
         subagentThreadIDs: Set<String>
     ) -> Bool {
         (session.isCodex || session.isCodexDesktopHost) && subagentThreadIDs.contains(session.sessionId)
+    }
+
+    /// Codex Desktop can launch short-lived `codex exec` helper threads. They are useful as
+    /// rollout artifacts but should not appear as user-visible cctop sessions.
+    nonisolated static func codexExecHelperThreadIDs(in sessions: [Session]) -> Set<String> {
+        let threadIDs = Set(
+            sessions
+                .filter { $0.isCodex || $0.isCodexDesktopHost }
+                .map(\.sessionId)
+        )
+        return CodexThreadArchiveLookup().execHelperThreadIDs(matching: threadIDs) ?? []
+    }
+
+    nonisolated static func isCodexExecHelperSession(
+        _ session: Session,
+        execHelperThreadIDs: Set<String>
+    ) -> Bool {
+        (session.isCodex || session.isCodexDesktopHost) && execHelperThreadIDs.contains(session.sessionId)
     }
 
     /// Fresh single-session check used before persisting a hidden flag for a Codex subagent

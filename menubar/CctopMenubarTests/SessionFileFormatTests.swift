@@ -2,47 +2,7 @@ import XCTest
 @testable import CctopMenubar
 
 final class SessionFileFormatTests: XCTestCase {
-    private func writeCodexStateDatabase(
-        path: String,
-        archivedThreads: Set<String>,
-        subagentThreads: Set<String> = [],
-        gitOrigins: [String: String] = [:],
-        cwds: [String: String] = [:]
-    ) throws {
-        func sqlValue(_ value: String?) -> String {
-            guard let value else { return "NULL" }
-            return "'\(value.replacingOccurrences(of: "'", with: "''"))'"
-        }
-
-        let archivedRows = archivedThreads.map {
-            """
-            INSERT INTO threads (id, archived, thread_source, git_origin_url, cwd) VALUES (\(sqlValue($0)), 1, 'user', NULL, NULL);
-            """
-        }.joined(separator: "\n")
-        let subagentRows = subagentThreads.map {
-            """
-            INSERT INTO threads (id, archived, thread_source, git_origin_url, cwd) VALUES (\(sqlValue($0)), 0, 'subagent', NULL, NULL);
-            """
-        }.joined(separator: "\n")
-        let metadataRows = Set(gitOrigins.keys).union(cwds.keys).map { threadID in
-            """
-            INSERT INTO threads (id, archived, thread_source, git_origin_url, cwd)
-            VALUES (\(sqlValue(threadID)), 0, 'user', \(sqlValue(gitOrigins[threadID])), \(sqlValue(cwds[threadID])));
-            """
-        }.joined(separator: "\n")
-        let sql = """
-        DROP TABLE IF EXISTS threads;
-        CREATE TABLE threads (
-            id TEXT PRIMARY KEY,
-            archived INTEGER NOT NULL DEFAULT 0,
-            thread_source TEXT,
-            git_origin_url TEXT,
-            cwd TEXT
-        );
-        \(archivedRows)
-        \(subagentRows)
-        \(metadataRows)
-        """
+    private func executeSQLite(_ sql: String, path: String) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
         process.arguments = [path]
@@ -53,6 +13,100 @@ final class SessionFileFormatTests: XCTestCase {
         try stdin.fileHandleForWriting.close()
         process.waitUntilExit()
         XCTAssertEqual(process.terminationStatus, 0)
+    }
+
+    private func writeCodexStateDatabase(
+        path: String,
+        archivedThreads: Set<String>,
+        subagentThreads: Set<String> = [],
+        gitOrigins: [String: String] = [:],
+        cwds: [String: String] = [:],
+        execHelperThreads: Set<String> = [],
+        execThreadsWithFirstUserMessage: [String: String] = [:],
+        userExecThreads: Set<String> = []
+    ) throws {
+        func sqlValue(_ value: String?) -> String {
+            guard let value else { return "NULL" }
+            return "'\(value.replacingOccurrences(of: "'", with: "''"))'"
+        }
+
+        let rolloutDir = ((path as NSString).deletingLastPathComponent as NSString).appendingPathComponent("rollouts")
+        try FileManager.default.createDirectory(atPath: rolloutDir, withIntermediateDirectories: true)
+        func rolloutPath(threadID: String, originator: String) throws -> String {
+            let filePath = (rolloutDir as NSString).appendingPathComponent("\(threadID).jsonl")
+            let object: [String: Any] = [
+                "type": "session_meta",
+                "payload": [
+                    "id": threadID,
+                    "originator": originator,
+                    "source": "exec"
+                ]
+            ]
+            var data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+            data.append(0x0a)
+            try data.write(to: URL(fileURLWithPath: filePath), options: .atomic)
+            return filePath
+        }
+
+        let archivedRows = archivedThreads.map {
+            """
+            INSERT INTO threads (id, rollout_path, archived, thread_source, git_origin_url, cwd, source, has_user_event, first_user_message)
+            VALUES (\(sqlValue($0)), '', 1, 'user', NULL, NULL, 'vscode', 1, '');
+            """
+        }.joined(separator: "\n")
+        let subagentRows = subagentThreads.map {
+            """
+            INSERT INTO threads (id, rollout_path, archived, thread_source, git_origin_url, cwd, source, has_user_event, first_user_message)
+            VALUES (\(sqlValue($0)), '', 0, 'subagent', NULL, NULL, 'vscode', 0, '');
+            """
+        }.joined(separator: "\n")
+        let metadataRows = Set(gitOrigins.keys).union(cwds.keys).map { threadID in
+            """
+            INSERT INTO threads (id, rollout_path, archived, thread_source, git_origin_url, cwd, source, has_user_event, first_user_message)
+            VALUES (\(sqlValue(threadID)), '', 0, 'user', \(sqlValue(gitOrigins[threadID])), \(sqlValue(cwds[threadID])), 'vscode', 1, '');
+            """
+        }.joined(separator: "\n")
+        let execHelperRows = try execHelperThreads.map {
+            let rollout = try rolloutPath(threadID: $0, originator: "Codex Desktop")
+            return """
+            INSERT INTO threads (id, rollout_path, archived, thread_source, git_origin_url, cwd, source, has_user_event, first_user_message)
+            VALUES (\(sqlValue($0)), \(sqlValue(rollout)), 0, '', NULL, NULL, 'exec', 0, 'Review the release diff');
+            """
+        }.joined(separator: "\n")
+        let execFirstMessageRows = try execThreadsWithFirstUserMessage.map { threadID, firstUserMessage in
+            let rollout = try rolloutPath(threadID: threadID, originator: "codex_exec")
+            return """
+            INSERT INTO threads (id, rollout_path, archived, thread_source, git_origin_url, cwd, source, has_user_event, first_user_message)
+            VALUES (\(sqlValue(threadID)), \(sqlValue(rollout)), 0, '', NULL, NULL, 'exec', 0, \(sqlValue(firstUserMessage)));
+            """
+        }.joined(separator: "\n")
+        let userExecRows = userExecThreads.map {
+            """
+            INSERT INTO threads (id, rollout_path, archived, thread_source, git_origin_url, cwd, source, has_user_event, first_user_message)
+            VALUES (\(sqlValue($0)), '', 0, '', NULL, NULL, 'exec', 1, '');
+            """
+        }.joined(separator: "\n")
+        let sql = """
+        DROP TABLE IF EXISTS threads;
+        CREATE TABLE threads (
+            id TEXT PRIMARY KEY,
+            rollout_path TEXT NOT NULL DEFAULT '',
+            archived INTEGER NOT NULL DEFAULT 0,
+            thread_source TEXT,
+            git_origin_url TEXT,
+            cwd TEXT,
+            source TEXT NOT NULL DEFAULT '',
+            has_user_event INTEGER NOT NULL DEFAULT 0,
+            first_user_message TEXT NOT NULL DEFAULT ''
+        );
+        \(archivedRows)
+        \(subagentRows)
+        \(metadataRows)
+        \(execHelperRows)
+        \(execFirstMessageRows)
+        \(userExecRows)
+        """
+        try executeSQLite(sql, path: path)
     }
 
     private func codexTerminalSession(sessionId: String, projectPath: String) -> Session {
@@ -528,6 +582,130 @@ final class SessionFileFormatTests: XCTestCase {
         XCTAssertTrue(try Session.fromFile(path: cliPath).hidden)
         XCTAssertTrue(try Session.fromFile(path: desktopPath).hidden)
         XCTAssertTrue((try FileManager.default.contentsOfDirectory(atPath: historyDir)).isEmpty)
+
+        manager = nil
+    }
+
+    @MainActor
+    func testSessionManagerFiltersCodexExecHelperThreadsWithoutRemovingFiles() throws {
+        let root = NSTemporaryDirectory() + "cctop-codex-exec-helper-\(UUID().uuidString)"
+        let sessionsDir = (root as NSString).appendingPathComponent("sessions")
+        let historyDir = (root as NSString).appendingPathComponent("history")
+        let stateDB = (root as NSString).appendingPathComponent("state_5.sqlite")
+        try FileManager.default.createDirectory(atPath: sessionsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: historyDir, withIntermediateDirectories: true)
+        try writeCodexStateDatabase(
+            path: stateDB,
+            archivedThreads: [],
+            execHelperThreads: ["codex-exec-helper"]
+        )
+
+        setenv("CCTOP_SESSIONS_DIR", sessionsDir, 1)
+        setenv("CCTOP_CODEX_STATE_DB", stateDB, 1)
+        defer {
+            unsetenv("CCTOP_SESSIONS_DIR")
+            unsetenv("CCTOP_CODEX_STATE_DB")
+            try? FileManager.default.removeItem(atPath: root)
+        }
+
+        let sessionPath = (sessionsDir as NSString).appendingPathComponent("codex-codex-exec-helper.json")
+        try codexDesktopSession(
+            sessionId: "codex-exec-helper",
+            projectPath: (root as NSString).appendingPathComponent("projects/cctop")
+        ).writeToFile(path: sessionPath)
+        FileManager.default.createFile(atPath: sessionPath + ".lock", contents: nil)
+
+        var manager: SessionManager? = SessionManager(
+            historyManager: HistoryManager(historyDir: URL(fileURLWithPath: historyDir)),
+            desktopAppConnectionLookup: DesktopAppConnectionLookup { _ in true }
+        )
+        manager?.loadSessions()
+
+        XCTAssertEqual(manager?.sessions, [])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sessionPath))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sessionPath + ".lock"))
+        XCTAssertFalse(try Session.fromFile(path: sessionPath).hidden)
+        XCTAssertTrue((try FileManager.default.contentsOfDirectory(atPath: historyDir)).isEmpty)
+
+        manager = nil
+    }
+
+    @MainActor
+    func testSessionManagerKeepsUserVisibleCodexExecThreads() throws {
+        let root = NSTemporaryDirectory() + "cctop-codex-user-exec-\(UUID().uuidString)"
+        let sessionsDir = (root as NSString).appendingPathComponent("sessions")
+        let historyDir = (root as NSString).appendingPathComponent("history")
+        let stateDB = (root as NSString).appendingPathComponent("state_5.sqlite")
+        try FileManager.default.createDirectory(atPath: sessionsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: historyDir, withIntermediateDirectories: true)
+        try writeCodexStateDatabase(
+            path: stateDB,
+            archivedThreads: [],
+            userExecThreads: ["codex-user-exec"]
+        )
+
+        setenv("CCTOP_SESSIONS_DIR", sessionsDir, 1)
+        setenv("CCTOP_CODEX_STATE_DB", stateDB, 1)
+        defer {
+            unsetenv("CCTOP_SESSIONS_DIR")
+            unsetenv("CCTOP_CODEX_STATE_DB")
+            try? FileManager.default.removeItem(atPath: root)
+        }
+
+        let sessionPath = (sessionsDir as NSString).appendingPathComponent("codex-codex-user-exec.json")
+        try codexDesktopSession(
+            sessionId: "codex-user-exec",
+            projectPath: (root as NSString).appendingPathComponent("projects/cctop")
+        ).writeToFile(path: sessionPath)
+
+        var manager: SessionManager? = SessionManager(
+            historyManager: HistoryManager(historyDir: URL(fileURLWithPath: historyDir)),
+            desktopAppConnectionLookup: DesktopAppConnectionLookup { _ in true }
+        )
+        manager?.loadSessions()
+
+        XCTAssertEqual(manager?.sessions.map(\.sessionId), ["codex-user-exec"])
+        XCTAssertFalse(try Session.fromFile(path: sessionPath).hidden)
+
+        manager = nil
+    }
+
+    @MainActor
+    func testSessionManagerKeepsCodexExecThreadsWithFirstUserMessageVisible() throws {
+        let root = NSTemporaryDirectory() + "cctop-codex-exec-first-message-\(UUID().uuidString)"
+        let sessionsDir = (root as NSString).appendingPathComponent("sessions")
+        let historyDir = (root as NSString).appendingPathComponent("history")
+        let stateDB = (root as NSString).appendingPathComponent("state_5.sqlite")
+        try FileManager.default.createDirectory(atPath: sessionsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: historyDir, withIntermediateDirectories: true)
+        try writeCodexStateDatabase(
+            path: stateDB,
+            archivedThreads: [],
+            execThreadsWithFirstUserMessage: ["codex-exec-first-message": "Review this diff"]
+        )
+
+        setenv("CCTOP_SESSIONS_DIR", sessionsDir, 1)
+        setenv("CCTOP_CODEX_STATE_DB", stateDB, 1)
+        defer {
+            unsetenv("CCTOP_SESSIONS_DIR")
+            unsetenv("CCTOP_CODEX_STATE_DB")
+            try? FileManager.default.removeItem(atPath: root)
+        }
+
+        let sessionPath = (sessionsDir as NSString).appendingPathComponent("codex-codex-exec-first-message.json")
+        try codexDesktopSession(
+            sessionId: "codex-exec-first-message",
+            projectPath: (root as NSString).appendingPathComponent("projects/cctop")
+        ).writeToFile(path: sessionPath)
+
+        var manager: SessionManager? = SessionManager(
+            historyManager: HistoryManager(historyDir: URL(fileURLWithPath: historyDir)),
+            desktopAppConnectionLookup: DesktopAppConnectionLookup { _ in true }
+        )
+        manager?.loadSessions()
+
+        XCTAssertEqual(manager?.sessions.map(\.sessionId), ["codex-exec-first-message"])
+        XCTAssertFalse(try Session.fromFile(path: sessionPath).hidden)
 
         manager = nil
     }
