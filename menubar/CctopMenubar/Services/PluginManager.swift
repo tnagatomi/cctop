@@ -14,6 +14,8 @@ class PluginManager: ObservableObject {
     @Published var codexInstalled: Bool = false
     @Published var codexNeedsUpdate: Bool = false
     @Published var codexConfigExists: Bool = false
+    @Published var codexHookStatus: CodexHookStatus = .notInstalled
+    @Published var codexLegacyConfigKey: Bool = false
 
     static let ccInstallCommand =
         "claude plugin marketplace add st0012/cctop && claude plugin install cctop"
@@ -50,15 +52,27 @@ class PluginManager: ObservableObject {
         piConfigExists = fm.fileExists(atPath: piConfigDir.path)
         piInstalled = fm.fileExists(atPath: Self.piPluginPath.path)
 
-        codexConfigExists = CodexPluginInstaller.codexConfigExists()
-        codexInstalled = CodexPluginInstaller.isInstalled()
-
-        let codexConfigText: String? = codexConfigExists
+        let codexDirExists = CodexPluginInstaller.codexConfigExists()
+        let codexConfigText: String? = codexDirExists
             ? (try? String(contentsOf: CodexPluginInstaller.configTomlPath, encoding: .utf8))
             : nil
-
-        codexNeedsUpdate = codexInstalled
-            && Self.codexInstallStale(configText: codexConfigText)
+        let codexHookFilesInstalled = CodexPluginInstaller.hasInstalledHookFiles()
+        // The legacy key feeds both the update flag and the cleanup hint —
+        // compute it once per refresh.
+        let codexLegacyKey = codexConfigText.map(CodexPluginInstaller.configTomlHasLegacyKey) ?? false
+        let codexSnapshot = CodexIntegrationManager.snapshot(CodexIntegrationObservation(
+            configExists: codexDirExists,
+            hookFilesInstalled: codexHookFilesInstalled,
+            featureEnabled: codexConfigText.map(CodexPluginInstaller.isFeatureFlagEnabled) ?? true,
+            needsUpdate: codexHookFilesInstalled && (Self.codexShimStale() || codexLegacyKey),
+            configText: codexConfigText,
+            legacyConfigKey: codexLegacyKey
+        ))
+        codexConfigExists = codexSnapshot.configExists
+        codexNeedsUpdate = codexSnapshot.needsUpdate
+        codexHookStatus = codexSnapshot.hookStatus
+        codexInstalled = codexSnapshot.installed
+        codexLegacyConfigKey = codexSnapshot.legacyConfigKey
     }
 
     /// Cache layout is `<marketplace>/<plugin>/<version>/`. Claude Code writes a `.orphaned_at`
@@ -85,20 +99,16 @@ class PluginManager: ObservableObject {
         return bundledData != installedData
     }
 
-    /// "Update Available" fires when either the bundled shim differs from the
-    /// installed one OR the supplied config.toml content still contains the
-    /// deprecated `[features].codex_hooks` key. The install action handles
-    /// both: it rewrites the shim and migrates the TOML key in one click.
-    /// Takes the config text as a parameter so callers can dedupe the disk read.
-    private static func codexInstallStale(configText: String?) -> Bool {
-        if let data = loadBundledResource(name: "codex-shim", ext: "sh"),
-           CodexPluginInstaller.needsUpdate(bundledShim: data) {
-            return true
+    /// True when the bundled shim differs from the installed one. The other
+    /// "Update Available" trigger — a deprecated `codex_hooks` key — is
+    /// supplied by the caller, which already computed it for the snapshot.
+    /// The update action handles both: it rewrites the shim and migrates the
+    /// TOML key in one click.
+    private static func codexShimStale() -> Bool {
+        guard let data = loadBundledResource(name: "codex-shim", ext: "sh") else {
+            return false
         }
-        if let text = configText, CodexPluginInstaller.configTomlHasLegacyKey(text) {
-            return true
-        }
-        return false
+        return CodexPluginInstaller.needsUpdate(bundledShim: data)
     }
 
     /// Read a bundled Resources file. Logs and returns nil if missing or unreadable.
@@ -122,6 +132,14 @@ class PluginManager: ObservableObject {
     func removeCodexPlugin() -> Bool {
         defer { refresh() }
         return CodexPluginInstaller.remove()
+    }
+
+    /// Cleanup-only path for a deprecated `codex_hooks` key left behind
+    /// without an install (e.g. hooks removed by an older cctop that didn't
+    /// migrate). Install and remove already migrate as part of their work.
+    func cleanUpCodexLegacyConfig() -> Bool {
+        defer { refresh() }
+        return CodexPluginInstaller.migrateLegacyConfigKey()
     }
 
     func installOpenCodePlugin() -> Bool {

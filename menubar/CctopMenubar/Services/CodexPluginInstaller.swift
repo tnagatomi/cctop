@@ -14,6 +14,8 @@ private let logger = Logger(subsystem: "com.st0012.CctopMenubar", category: "Cod
 /// so reinstall is idempotent and uninstall never touches entries it did not create.
 enum CodexPluginInstaller {
 
+    /// Mirrors `CodexIntegrationManager.trustStateEventKeys` (the snake_case
+    /// keys Codex uses for trust records) — keep both lists in sync.
     static let registeredEvents: [String] = [
         "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"
     ]
@@ -43,13 +45,10 @@ enum CodexPluginInstaller {
         FileManager.default.fileExists(atPath: codexDir.path)
     }
 
-    /// Wired up to fire on Codex events? Requires shim + 5 hook entries + hooks
-    /// not explicitly disabled. A missing config.toml or an unset flag counts
-    /// as enabled because Codex defaults `[features].hooks` to true. Only an
-    /// explicit `hooks = false` (or `codex_hooks = false` with no overriding
-    /// `hooks` value) flips this to false.
-    /// Staleness is reported separately via `needsUpdate(bundledShim:)`.
-    static func isInstalled() -> Bool {
+    /// True when cctop's shim and all expected hook entries are present in
+    /// `~/.codex`. This does not mean Codex has loaded, trusted, or executed
+    /// those hooks — see `CodexIntegrationManager.hasTrustedCctopHookState`.
+    static func hasInstalledHookFiles() -> Bool {
         guard FileManager.default.fileExists(atPath: shimPath.path) else { return false }
         guard let root = try? readJsonDict(at: hooksJsonPath),
               let hooks = root["hooks"] as? [String: Any] else {
@@ -59,6 +58,17 @@ enum CodexPluginInstaller {
             guard let entries = hooks[event] as? [[String: Any]],
                   entries.contains(where: hasCctopCommand) else { return false }
         }
+        return true
+    }
+
+    /// Wired up to fire on Codex events? Requires cctop's files plus hooks
+    /// not explicitly disabled. A missing config.toml or an unset flag counts
+    /// as enabled because Codex defaults `[features].hooks` to true. Only an
+    /// explicit `hooks = false` (or `codex_hooks = false` with no overriding
+    /// `hooks` value) flips this to false.
+    /// Staleness is reported separately via `needsUpdate(bundledShim:)`.
+    static func isInstalled() -> Bool {
+        guard hasInstalledHookFiles() else { return false }
         // Only an explicit opt-out counts as not installed. Missing file or
         // unset flag = Codex default (hooks enabled).
         if let configText = try? String(contentsOf: configTomlPath, encoding: .utf8),
@@ -109,7 +119,9 @@ enum CodexPluginInstaller {
     }
 
     /// Remove cctop's hooks entries and delete the shim. Leaves the feature flag and
-    /// any user-defined hooks untouched.
+    /// any user-defined hooks untouched, but migrates the deprecated `codex_hooks`
+    /// key (old cctop versions wrote it) so the user isn't left with Codex's
+    /// startup deprecation warning after uninstalling.
     static func remove() -> Bool {
         do {
             try removeHooksEntries()
@@ -117,10 +129,32 @@ enum CodexPluginInstaller {
             if FileManager.default.fileExists(atPath: shimPath.path) {
                 try FileManager.default.removeItem(at: shimPath)
             }
+            // Best-effort: a failed migration shouldn't fail the remove.
+            _ = migrateLegacyConfigKey()
             logger.info("Removed Codex plugin")
             return true
         } catch {
             logger.error("Failed to remove Codex plugin: \(error, privacy: .public)")
+            return false
+        }
+    }
+
+    /// Rename a lingering `[features].codex_hooks` key to `hooks` in
+    /// config.toml, preserving its effective value (see
+    /// `CodexConfigToml.migrateLegacyKey`). Returns false only when the
+    /// rewrite fails; a missing file or absent key is a successful no-op.
+    static func migrateLegacyConfigKey() -> Bool {
+        guard let raw = try? String(contentsOf: configTomlPath, encoding: .utf8) else {
+            return true
+        }
+        let migrated = CodexConfigToml.migrateLegacyKey(raw)
+        guard migrated != raw else { return true }
+        do {
+            try Data(migrated.utf8).write(to: configTomlPath, options: .atomic)
+            logger.info("Migrated deprecated codex_hooks key in config.toml")
+            return true
+        } catch {
+            logger.error("Failed to migrate codex_hooks key: \(error, privacy: .public)")
             return false
         }
     }

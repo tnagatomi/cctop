@@ -113,7 +113,7 @@ brew install --cask st0012/cctop/cctop
 
 ### Step 2: Connect your tools
 
-The app auto-detects installed coding tools. For **opencode** and **pi**, click *Install Plugin* in Settings > Monitored Tools. For **Codex CLI or Codex Desktop**, click *Install Hooks*.
+The app auto-detects installed coding tools. For **opencode** and **pi**, click *Install Plugin* in Settings > Monitored Tools. For **Codex CLI or Codex Desktop**, click *Install Hooks*, then start a new Codex CLI session in your terminal and choose *Trust all and continue* when Codex asks to review the new hooks — Codex only executes hooks you've trusted, and cctop shows the row as *Ready* once they are. Codex Desktop has no review prompt, so trust the hooks once via the CLI; Desktop shares the same trust state.
 
 For **Claude Code or Claude Desktop**, run this one-liner in your terminal (the app also exposes a *Copy Install Command* button under Settings > Monitored Tools):
 
@@ -166,6 +166,9 @@ By default, the project directory name (e.g. `/path/to/my-app` shows as "my-app"
 
 **No sessions are showing up — what do I check?**
 First, make sure you restarted sessions after installing the plugin. Then check if session files exist: `ls ~/.cctop/sessions/`. If the directory is empty, the plugin isn't writing data — verify it's installed correctly (see Step 2). If files exist but the menubar shows nothing, check whether those JSON files have `"hidden": true`, then try restarting the cctop app.
+
+**Why doesn't cctop track sessions from the Codex desktop app?**
+Codex only runs hooks you've explicitly reviewed and trusted (see the [Codex hooks docs](https://developers.openai.com/codex/hooks)). cctop installs its hooks, but the Codex desktop app currently doesn't surface the trust prompt, so they stay inert. The workaround: start one new Codex CLI session in a terminal and choose *Trust all and continue* when Codex asks to review the new hooks — the desktop app shares that trust state and starts tracking too.
 
 **What happens if a coding tool crashes?**
 cctop detects dead sessions automatically. It checks whether each session's process is still running and removes stale entries. No manual cleanup needed.

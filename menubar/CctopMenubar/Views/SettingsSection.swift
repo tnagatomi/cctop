@@ -318,19 +318,12 @@ private struct PluginRowView: View {
     private var installButton: some View { actionButton(installLabel) }
 
     private func actionButton(_ label: String) -> some View {
-        Button {
+        AmberActionButton(label: label) {
             if install() {
                 justInstalled = true; installFailed = false
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { justInstalled = false }
             } else { flashFailed() }
-        } label: {
-            Text(label)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(Color.segmentActiveText)
-                .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(Color.amber)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-        }.buttonStyle(.plain)
+        }
     }
 
     private func flashFailed() {
@@ -407,25 +400,44 @@ struct ClaudeCodeInstallButton: View {
     }
 }
 
-private struct CodexPluginRowView: View {
-    @ObservedObject var pluginManager: PluginManager
-    @Binding var installFailed: Bool
+/// Amber pill action button shared by the plugin rows and the empty state.
+struct AmberActionButton: View {
+    let label: String
+    let action: () -> Void
+
     var body: some View {
-        PluginRowView(
-            name: "Codex CLI / Desktop", installed: pluginManager.codexInstalled,
-            needsUpdate: pluginManager.codexNeedsUpdate,
-            installLabel: "Install Hooks", updateLabel: "Update Hooks",
-            installFailed: $installFailed,
-            install: { pluginManager.installCodexPlugin() },
-            remove: { pluginManager.removeCodexPlugin() })
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.segmentActiveText)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.amber)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct StatusDotBadge: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(Color.statusGreen)
+                .frame(width: 5, height: 5)
+            Text(text)
+                .font(.system(size: 10))
+                .foregroundStyle(Color.textMuted)
+        }
     }
 }
 
 struct ConnectedBadge: View {
-    var body: some View { HStack(spacing: 4) {
-        Circle().fill(Color.statusGreen).frame(width: 5, height: 5)
-        Text("Connected").font(.system(size: 10)).foregroundStyle(Color.textMuted)
-    } }
+    var body: some View {
+        StatusDotBadge(text: "Connected")
+    }
 }
 // MARK: - Previews
 @MainActor private func previewCCRow(installed: Bool) -> PluginManager {
@@ -447,7 +459,17 @@ struct ConnectedBadge: View {
 @MainActor private func previewPM() -> PluginManager {
     let pm = PluginManager(); pm.ccInstalled = true; pm.ocInstalled = true
     pm.ocConfigExists = true; pm.piInstalled = true; pm.piConfigExists = true
-    pm.codexInstalled = true; pm.codexConfigExists = true; return pm
+    pm.codexInstalled = true; pm.codexConfigExists = true
+    pm.codexHookStatus = .trusted
+    return pm
+}
+@MainActor private func previewPendingCodexTrustPM() -> PluginManager {
+    let pm = previewPM()
+    pm.codexHookStatus = .installedUntrusted
+    return pm
 }
 #Preview("Default") { SettingsSection(updater: DisabledUpdater(), pluginManager: PluginManager()).frame(width: 320).padding() }
 #Preview("All connected") { SettingsSection(updater: DisabledUpdater(), pluginManager: previewPM()).frame(width: 320).padding() }
+#Preview("Codex trust needed") {
+    SettingsSection(updater: DisabledUpdater(), pluginManager: previewPendingCodexTrustPM()).frame(width: 320).padding()
+}
