@@ -97,6 +97,8 @@ struct PanelContentView: View {
     @ObservedObject var updater: UpdaterBase
     @ObservedObject var pluginManager: PluginManager
     @ObservedObject var navigate: NavigateController
+    /// Called (async on main) whenever content layout changes so the host can resize the panel.
+    var onLayoutChanged: () -> Void = {}
     @ObservedObject private var themeManager = ThemeManager.shared
     @StateObject private var overlayController = OverlayController()
 
@@ -107,7 +109,8 @@ struct PanelContentView: View {
             updater: updater,
             pluginManager: pluginManager,
             navigate: navigate,
-            overlayController: overlayController
+            overlayController: overlayController,
+            onLayoutChanged: onLayoutChanged
         )
         .frame(width: 320)
         .background(Color.panelBackground)
@@ -118,35 +121,48 @@ struct PanelContentView: View {
 
 // MARK: - PopupView Previews
 
+/// Inert manager for previews: no home-dir IO, every flag starts false.
+@MainActor private func previewPluginManager() -> PluginManager {
+    PluginManager(homeDirectory: URL(fileURLWithPath: "/nonexistent"), refreshOnInit: false)
+}
+
 #Preview("With sessions") {
-    PopupView(sessions: Session.mockSessions, updater: DisabledUpdater()).frame(width: 320)
+    PopupView(
+        sessions: Session.mockSessions, updater: DisabledUpdater(), pluginManager: previewPluginManager()
+    ).frame(width: 320)
 }
 #Preview("Mixed sources") {
-    PopupView(sessions: Session.qaShowcase, updater: DisabledUpdater()).frame(width: 320)
+    PopupView(
+        sessions: Session.qaShowcase, updater: DisabledUpdater(), pluginManager: previewPluginManager()
+    ).frame(width: 320)
 }
 #Preview("Empty") {
-    PopupView(sessions: [], updater: DisabledUpdater(), pluginManager: PluginManager()).frame(width: 320)
+    PopupView(
+        sessions: [], updater: DisabledUpdater(), pluginManager: previewPluginManager()
+    ).frame(width: 320)
 }
 #Preview("With Tabs") {
     PopupView(
-        sessions: Session.mockSessions, recentProjects: RecentProject.mockRecents, updater: DisabledUpdater()
+        sessions: Session.mockSessions, recentProjects: RecentProject.mockRecents,
+        updater: DisabledUpdater(), pluginManager: previewPluginManager()
     ).frame(width: 320)
 }
 #Preview("Only Recents") {
     PopupView(
         sessions: [], recentProjects: RecentProject.mockRecents,
-        updater: DisabledUpdater(), pluginManager: PluginManager()
+        updater: DisabledUpdater(), pluginManager: previewPluginManager()
     ).frame(width: 320)
 }
 #Preview("Empty Recents Tab") {
     PopupView(
-        sessions: Session.mockSessions, recentProjects: [RecentProject.mock()], updater: DisabledUpdater()
+        sessions: Session.mockSessions, recentProjects: [RecentProject.mock()],
+        updater: DisabledUpdater(), pluginManager: previewPluginManager()
     ).frame(width: 320)
 }
 #Preview("Navigate") {
     let rc = NavigateController(); rc.isActive = true
     return PopupView(
         sessions: Session.qaShowcase, recentProjects: RecentProject.mockRecents,
-        updater: DisabledUpdater(), navigate: rc
+        updater: DisabledUpdater(), pluginManager: previewPluginManager(), navigate: rc
     ).frame(width: 320)
 }

@@ -46,6 +46,14 @@ extension JSONDecoder {
     }()
 }
 
+/// Bundle identifiers of the desktop apps that host coding sessions in-app.
+/// Single source of truth for both targets: the hook trusts these IDs when
+/// classifying desktop-hosted sessions, and the app maps them to `HostApp` cases.
+enum HostAppBundleID {
+    static let claudeDesktop = "com.anthropic.claudefordesktop"
+    static let codexDesktop = "com.openai.codex"
+}
+
 struct TerminalInfo: Codable, Equatable {
     let program: String
     let sessionId: String?
@@ -160,7 +168,7 @@ enum SessionLifecycle: Int, Equatable {
 }
 
 struct Session: Codable, Identifiable, Equatable {
-    let sessionId: String
+    var sessionId: String
     let projectPath: String
     let projectName: String
     var branch: String
@@ -336,32 +344,24 @@ struct Session: Codable, Identifiable, Equatable {
     }
 
     /// Convenience init for creating new sessions (used by cctop-hook).
+    /// Delegates to the memberwise init so fields added to `Session` later pick up
+    /// their memberwise defaults here instead of needing a second hand-synced list.
     init(sessionId: String, projectPath: String, branch: String, terminal: TerminalInfo) {
-        self.sessionId = sessionId
-        self.projectPath = projectPath
-        self.projectName = Self.extractProjectName(projectPath)
-        self.branch = branch
-        self.status = .idle
-        self.lastPrompt = nil
-        self.lastActivity = Date()
-        self.startedAt = Date()
-        self.terminal = terminal
-        self.pid = nil
-        self.pidStartTime = nil
-        self.lastTool = nil
-        self.lastToolDetail = nil
-        self.notificationMessage = nil
-        self.sessionName = nil
-        self.desktopProjectName = nil
-        self.workspaceFile = nil
-        self.source = nil
-        self.endedAt = nil
-        self.disconnectedAt = nil
-        self.activeSubagents = nil
-        self.isSubagentSession = false
-        self.hidden = false
-        self.createdByHookVersion = nil
-        self.lastWrittenByHookVersion = nil
+        self.init(
+            sessionId: sessionId,
+            projectPath: projectPath,
+            projectName: Self.extractProjectName(projectPath),
+            branch: branch,
+            status: .idle,
+            lastPrompt: nil,
+            lastActivity: Date(),
+            startedAt: Date(),
+            terminal: terminal,
+            pid: nil,
+            lastTool: nil,
+            lastToolDetail: nil,
+            notificationMessage: nil
+        )
     }
 
     mutating func markWrittenByHook(version: String, isNewSessionFile: Bool) {
@@ -410,34 +410,14 @@ struct Session: Codable, Identifiable, Equatable {
 
     /// Returns a copy with a new session_id (and optionally updated branch/terminal).
     /// Used when the same OS process gets a new CC session_id on resume.
+    /// Copy-mutation preserves every other field by construction, so fields added
+    /// to `Session` later can never be silently dropped on session-id rotation.
     func withSessionId(_ newId: String, branch: String? = nil, terminal: TerminalInfo? = nil) -> Session {
-        Session(
-            sessionId: newId,
-            projectPath: projectPath,
-            projectName: projectName,
-            branch: branch ?? self.branch,
-            status: status,
-            lastPrompt: lastPrompt,
-            lastActivity: lastActivity,
-            startedAt: startedAt,
-            terminal: terminal ?? self.terminal,
-            pid: pid,
-            pidStartTime: pidStartTime,
-            lastTool: lastTool,
-            lastToolDetail: lastToolDetail,
-            notificationMessage: notificationMessage,
-            sessionName: sessionName,
-            desktopProjectName: desktopProjectName,
-            workspaceFile: workspaceFile,
-            source: source,
-            endedAt: endedAt,
-            disconnectedAt: disconnectedAt,
-            activeSubagents: activeSubagents,
-            isSubagentSession: isSubagentSession,
-            hidden: hidden,
-            createdByHookVersion: createdByHookVersion,
-            lastWrittenByHookVersion: lastWrittenByHookVersion
-        )
+        var copy = self
+        copy.sessionId = newId
+        if let branch { copy.branch = branch }
+        if let terminal { copy.terminal = terminal }
+        return copy
     }
 
     /// Look for a `.code-workspace` file in the given directory.

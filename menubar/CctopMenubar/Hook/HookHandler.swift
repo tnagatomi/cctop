@@ -3,38 +3,33 @@ import Foundation
 
 private let maxToolDetailLen = 120
 
-enum HostAppBundleID {
-    static let claudeDesktop = "com.anthropic.claudefordesktop"
-    static let codexDesktop = "com.openai.codex"
-}
-
 enum HookHandler {
     // MIGRATION(v0.6.0): Remove after all users have migrated to PID-keyed sessions.
     private static let noPIDMaxAge: TimeInterval = 300
 
-    static func handleHook(hookName: String, input: HookInput) throws {
+    static func handleHook(hookName: String, input: HookInput, deps: HookDependencies = .live) throws {
         let event = HookEvent.parse(hookName: hookName, notificationType: input.notificationType)
 
         if event == .sessionEnd {
-            handleSessionEnd(hookName: hookName, input: input)
+            handleSessionEnd(hookName: hookName, input: input, deps: deps)
             return
         }
 
-        let sessionsDir = Config.sessionsDir()
+        let sessionsDir = deps.sessionsDir()
         let safeId = Session.sanitizeSessionId(raw: input.sessionId)
-        let pid = getParentPID()
+        let pid = deps.process.parentPID()
         let label = HookLogger.sessionLabel(cwd: input.cwd, sessionId: safeId)
         let sessionPath = (sessionsDir as NSString).appendingPathComponent(sessionFileName(input: input, pid: pid, safeSessionId: safeId))
 
-        let branch = getCurrentBranch(cwd: input.cwd)
-        let terminal = captureTerminalInfo()
-        let startTime = Session.processStartTime(pid: pid)
+        let branch = deps.currentBranch(input.cwd)
+        let terminal = captureTerminalInfo(env: deps.environment(), process: deps.process)
+        let startTime = deps.process.startTime(pid: pid)
 
         // Lock the session file for the entire read-modify-write cycle.
         // Without this, concurrent hook processes (e.g. SubagentStart + PreToolUse
         // firing simultaneously) race: both read the old file, apply changes
         // independently, and the last writer wins — clobbering the first writer's changes.
-        try withSessionLock(sessionPath: sessionPath) {
+        try withSessionLock(sessionPath: sessionPath, onError: deps.logger.logError) {
             let freshSession = Session(sessionId: safeId, projectPath: input.cwd, branch: branch, terminal: terminal)
             let loaded = loadOrCreateSession(
                 path: sessionPath, event: event, startTime: startTime, fresh: freshSession
@@ -46,13 +41,14 @@ enum HookHandler {
             session.pidStartTime = startTime
 
             let (oldStatus, newStatus) = applyTransition(&session, event: event, input: input, branch: branch, terminal: terminal)
+            applySessionName(&session, event: event, input: input, names: deps.names)
             applySideEffects(event: event, session: &session, input: input, sessionsDir: sessionsDir, safeId: safeId)
             if input.isSubagentSession == true { session.isSubagentSession = true }
             if session.shouldAutoHide { session.hidden = true }
             session.markWrittenByHook(version: Config.hookVersion, isNewSessionFile: isNewSessionFile)
 
             let suffix = newStatus == nil ? " (preserved)" : ""
-            HookLogger.appendHookLog(
+            deps.logger.appendHookLog(
                 sessionId: safeId, event: hookName, label: label,
                 transition: "\(oldStatus) -> \(session.status.rawValue)\(suffix)"
             )
@@ -62,7 +58,10 @@ enum HookHandler {
         // Cleanup runs outside the lock — it scans all session files and makes
         // sysctl calls per file, which would unnecessarily hold the lock.
         if event == .sessionStart {
-            cleanupSessionsForProject(sessionsDir: sessionsDir, projectPath: input.cwd, currentPid: pid)
+            cleanupSessionsForProject(
+                sessionsDir: sessionsDir, projectPath: input.cwd, currentPid: pid,
+                process: deps.process, logger: deps.logger
+            )
         }
     }
 
@@ -110,6 +109,14 @@ enum HookHandler {
         // Renaming the JSON key would require a reader-side migration in SessionManager.
         // Do that in a future PR once `harness_name` is settled.
         if let harness = input.resolvedHarnessName { session.source = harness }
+        return (oldStatus, newStatus)
+    }
+
+    /// Update the user-visible session name. Runs right after applyTransition, once
+    /// source/terminal are current, since the lookup strategy depends on both.
+    private static func applySessionName(
+        _ session: inout Session, event: HookEvent, input: HookInput, names: any SessionNameResolving
+    ) {
         if let name = input.sessionName {
             session.sessionName = name
         } else if event == .sessionStart || event == .userPromptSubmit || event == .stop
@@ -127,11 +134,11 @@ enum HookHandler {
             //   - terminal CC:    the transcript JSONL `custom-title` entry
             let lookedUp: String?
             if session.source == "codex" {
-                lookedUp = SessionNameLookup.lookupCodexThreadName(sessionId: input.sessionId)
+                lookedUp = names.codexThreadName(sessionId: input.sessionId)
             } else if session.terminal?.bundleId == HostAppBundleID.claudeDesktop {
-                lookedUp = SessionNameLookup.lookupClaudeDesktopTitle(cliSessionId: input.sessionId)
+                lookedUp = names.claudeDesktopTitle(cliSessionId: input.sessionId)
             } else {
-                lookedUp = SessionNameLookup.lookupSessionName(
+                lookedUp = names.transcriptSessionName(
                     transcriptPath: input.transcriptPath, sessionId: input.sessionId
                 )
             }
@@ -139,7 +146,6 @@ enum HookHandler {
                 session.sessionName = name
             }
         }
-        return (oldStatus, newStatus)
     }
 
     private static func applySideEffects(
@@ -257,13 +263,12 @@ enum HookHandler {
         }
     }
 
-    static func captureTerminalInfo() -> TerminalInfo {
-        let env = ProcessInfo.processInfo.environment
+    static func captureTerminalInfo(env: [String: String], process: any ProcessProbing) -> TerminalInfo {
         let program = env["TERM_PROGRAM"] ?? ""
         let sessionId = sanitizeTerminalSessionId(
             env["ITERM_SESSION_ID"] ?? env["KITTY_WINDOW_ID"]
         )
-        let tty = env["TTY"] ?? findTTY()
+        let tty = env["TTY"] ?? process.controllingTTY()
         let bundleId = env["__CFBundleIdentifier"]
         // Remote-control socket for pane focusing.
         // Currently only Kitty (https://sw.kovidgoyal.net/kitty/remote-control/).
@@ -327,7 +332,7 @@ enum HookHandler {
     /// Walk up the process tree to find the first ancestor with a controlling terminal.
     /// The hook subprocess itself has no tty (stdin is piped JSON), but ancestor
     /// processes (claude, shell) do.
-    private static func findTTY() -> String? {
+    static func findTTY() -> String? {
         var pid = getppid()
         for _ in 0..<6 {
             if pid <= 1 { break }
@@ -349,13 +354,13 @@ enum HookHandler {
 extension HookHandler {
     // MARK: - Cleanup
 
-    private static func handleSessionEnd(hookName: String, input: HookInput) {
-        let pid = getParentPID()
+    private static func handleSessionEnd(hookName: String, input: HookInput, deps: HookDependencies) {
+        let pid = deps.process.parentPID()
         let safeId = Session.sanitizeSessionId(raw: input.sessionId)
-        let path = (Config.sessionsDir() as NSString).appendingPathComponent(sessionFileName(input: input, pid: pid, safeSessionId: safeId))
+        let path = (deps.sessionsDir() as NSString).appendingPathComponent(sessionFileName(input: input, pid: pid, safeSessionId: safeId))
         let label = HookLogger.sessionLabel(cwd: input.cwd, sessionId: safeId)
         // Stamp endedAt instead of deleting — the menubar app archives to history on next poll.
-        try? withSessionLock(sessionPath: path) {
+        try? withSessionLock(sessionPath: path, onError: deps.logger.logError) {
             if var session = try? Session.fromFile(path: path) {
                 let endedAt = Date()
                 session.endedAt = endedAt
@@ -364,15 +369,18 @@ extension HookHandler {
                 }
                 session.markWrittenByHook(version: Config.hookVersion, isNewSessionFile: false)
                 try? session.writeToFile(path: path)
-                HookLogger.appendHookLog(sessionId: safeId, event: hookName, label: label, transition: "-> ended")
+                deps.logger.appendHookLog(sessionId: safeId, event: hookName, label: label, transition: "-> ended")
             } else {
-                HookLogger.appendHookLog(sessionId: safeId, event: hookName, label: label, transition: "-> removed")
-                removeSession(at: path, sessionId: safeId)
+                deps.logger.appendHookLog(sessionId: safeId, event: hookName, label: label, transition: "-> removed")
+                removeSession(at: path, sessionId: safeId, logger: deps.logger)
             }
         }
     }
 
-    static func cleanupSessionsForProject(sessionsDir: String, projectPath: String, currentPid: UInt32?) {
+    static func cleanupSessionsForProject(
+        sessionsDir: String, projectPath: String, currentPid: UInt32?,
+        process: any ProcessProbing = LiveProcessProber(), logger: HookLogger = HookLogger()
+    ) {
         forEachSession(in: sessionsDir) { path, session in
             guard session.projectPath == projectPath, session.pid != currentPid else { return }
 
@@ -385,10 +393,10 @@ extension HookHandler {
 
             let isStale: Bool
             if let pid = session.pid {
-                if !isPIDAlive(pid) {
+                if !process.isAlive(pid: pid) {
                     isStale = true
                 } else if let storedStart = session.pidStartTime,
-                          let currentStart = Session.processStartTime(pid: pid),
+                          let currentStart = process.startTime(pid: pid),
                           abs(storedStart - currentStart) > 1.0 {
                     isStale = true  // PID reused by a different process
                 } else {
@@ -400,7 +408,7 @@ extension HookHandler {
             }
 
             if isStale {
-                removeSession(at: path, sessionId: session.sessionId)
+                removeSession(at: path, sessionId: session.sessionId, logger: logger)
             }
         }
     }
@@ -425,46 +433,23 @@ extension HookHandler {
         }
     }
 
-    private static func removeSession(at path: String, sessionId: String) {
+    private static func removeSession(at path: String, sessionId: String, logger: HookLogger) {
         try? FileManager.default.removeItem(atPath: path)
         // Never remove the .lock here: unlinking a held lock splits the flock inode.
-        HookLogger.cleanupSessionLog(sessionId: sessionId)
+        logger.cleanupSessionLog(sessionId: sessionId)
     }
 
-    private static func isPIDAlive(_ pid: UInt32) -> Bool {
+    static func isPIDAlive(_ pid: UInt32) -> Bool {
         kill(Int32(pid), 0) == 0 || errno == EPERM
     }
 }
 
-// MARK: - Session File Locking
-
-/// Acquire an exclusive flock on a `.lock` file alongside the session file.
-/// This serializes concurrent hook processes operating on the same session,
-/// preventing read-modify-write races when multiple hooks fire simultaneously.
-func withSessionLock(sessionPath: String, body: () throws -> Void) throws {
-    let lockPath = sessionPath + ".lock"
-    let fd = open(lockPath, O_CREAT | O_WRONLY, 0o600)
-    guard fd >= 0 else {
-        let err = errno
-        HookLogger.logError("withSessionLock: open(\(lockPath)) failed: \(err)")
-        throw NSError(domain: NSPOSIXErrorDomain, code: Int(err),
-                      userInfo: [NSLocalizedDescriptionKey: "Failed to open lock file: \(lockPath)"])
-    }
-    defer { close(fd) }
-    guard flock(fd, LOCK_EX) == 0 else {
-        let err = errno
-        HookLogger.logError("withSessionLock: flock(\(lockPath)) failed: \(err)")
-        throw NSError(domain: NSPOSIXErrorDomain, code: Int(err),
-                      userInfo: [NSLocalizedDescriptionKey: "Failed to acquire lock: \(lockPath)"])
-    }
-    defer { flock(fd, LOCK_UN) }
-    try body()
-}
-
 // MARK: - Session File Naming
 
-/// Session files are keyed by PID, except Codex where one host process can emit hooks
-/// for multiple conversations. The `codex-` prefix avoids legacy UUID-file cleanup.
+/// The single writer-side source of truth for session file naming. Files are keyed by
+/// PID, except Codex where one host process can emit hooks for multiple conversations.
+/// The `codex-` prefix also keeps Codex files out of the reader-side legacy UUID-file
+/// sweep (`SessionManager.isLegacyUUIDFilename`) — keep both sides in sync.
 func sessionFileName(input: HookInput, pid: UInt32, safeSessionId: String) -> String {
     if input.resolvedHarnessName == Session.codexSource {
         return "codex-\(safeSessionId).json"

@@ -47,6 +47,10 @@ struct CodexIntegrationObservation: Equatable {
     let needsUpdate: Bool
     let configText: String?
     let legacyConfigKey: Bool
+    /// Absolute path of the observed hooks.json. Codex keys its trust
+    /// records by this path, so it is part of the observation instead of
+    /// being read from the installer at derivation time.
+    let hooksJsonPath: String
 }
 
 enum CodexIntegrationManager {
@@ -55,7 +59,8 @@ enum CodexIntegrationManager {
             installed: observation.hookFilesInstalled,
             featureEnabled: observation.featureEnabled,
             needsUpdate: observation.needsUpdate,
-            configText: observation.configText
+            configText: observation.configText,
+            hooksJsonPath: observation.hooksJsonPath
         )
         // Derive the published update flag from the status so every UI
         // surface agrees with the status-driven Settings row.
@@ -74,7 +79,8 @@ enum CodexIntegrationManager {
         installed: Bool,
         featureEnabled: Bool,
         needsUpdate: Bool,
-        configText: String?
+        configText: String?,
+        hooksJsonPath: String
     ) -> CodexHookStatus {
         guard installed else {
             return featureEnabled ? .notInstalled : .hooksDisabled
@@ -86,9 +92,7 @@ enum CodexIntegrationManager {
             return .needsUpdate
         }
         if let configText,
-           hasTrustedCctopHookState(
-               in: configText, hooksPath: CodexPluginInstaller.hooksJsonPath.path
-           ) {
+           hasTrustedCctopHookState(in: configText, hooksPath: hooksJsonPath) {
             return .trusted
         }
         return .installedUntrusted
@@ -96,12 +100,24 @@ enum CodexIntegrationManager {
 
     // MARK: - Codex trust records
 
-    /// Snake-case event keys Codex uses for `[hooks.state]` trust entries.
-    /// These are empirical observations of Codex's format that mirror
-    /// `CodexPluginInstaller.registeredEvents` — keep both lists in sync.
-    static let trustStateEventKeys: [String] = [
-        "session_start", "user_prompt_submit", "pre_tool_use", "post_tool_use", "stop"
-    ]
+    /// Snake-case event keys Codex uses for `[hooks.state]` trust entries
+    /// (an empirical observation of Codex's format), derived from
+    /// `CodexPluginInstaller.registeredEvents` so the two lists cannot drift.
+    static let trustStateEventKeys: [String] =
+        CodexPluginInstaller.registeredEvents.map(snakeCased)
+
+    /// PascalCase -> snake_case as Codex writes its trust-record keys:
+    /// SessionStart -> session_start, PreToolUse -> pre_tool_use.
+    private static func snakeCased(_ pascal: String) -> String {
+        var result = ""
+        for character in pascal {
+            if character.isUppercase && !result.isEmpty {
+                result.append("_")
+            }
+            result.append(character.lowercased())
+        }
+        return result
+    }
 
     /// Codex records reviewed command hooks under `[hooks.state]` in
     /// config.toml. Reading them is a conservative UI signal only: cctop
