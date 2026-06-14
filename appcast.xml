@@ -3,6 +3,25 @@
     <channel>
         <title>cctop</title>
         <item>
+            <title>0.17.3</title>
+            <pubDate>Sun, 14 Jun 2026 15:27:45 +0000</pubDate>
+            <link>https://raw.githubusercontent.com/st0012/cctop/master/appcast.xml</link>
+            <sparkle:version>1703</sparkle:version>
+            <sparkle:shortVersionString>0.17.3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure sparkle:cpu="arm64" url="https://github.com/st0012/cctop/releases/download/v0.17.3/cctop-macOS-arm64.zip" length="2502817" type="application/octet-stream" sparkle:edSignature="EjA3g3JG/Ra9qkleLT4P9tSRAYWLiNz2kYmyUWR2ZigCeAz1GhSl7QQkigKUIPE1n69iv23cNUgD5dacicVLDQ=="/>
+        </item>
+        <item>
+            <title>0.17.3</title>
+            <pubDate>Sun, 14 Jun 2026 15:27:45 +0000</pubDate>
+            <link>https://raw.githubusercontent.com/st0012/cctop/master/appcast.xml</link>
+            <sparkle:version>1703</sparkle:version>
+            <sparkle:shortVersionString>0.17.3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <enclosure sparkle:cpu="x86_64" url="https://github.com/st0012/cctop/releases/download/v0.17.3/cctop-macOS-x86_64.zip" sparkle:edSignature="spZ1JCVjgoVfgw2VfpVKQnSj+T73O+htXN9ox02ieKxu3Xq9GPJgJX2LaR54/E+8WP5tk5BsOX8wkh8lOlilBQ==" length="2532684" type="application/octet-stream" sparkle:version="1703" sparkle:shortVersionString="0.17.3" />
+        </item>
+        <item>
             <title>0.17.2</title>
             <pubDate>Wed, 10 Jun 2026 17:22:26 +0000</pubDate>
             <link>https://raw.githubusercontent.com/st0012/cctop/master/appcast.xml</link>
@@ -19,7 +38,7 @@
             <sparkle:version>1702</sparkle:version>
             <sparkle:shortVersionString>0.17.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <enclosure sparkle:cpu="x86_64" url="https://github.com/st0012/cctop/releases/download/v0.17.2/cctop-macOS-x86_64.zip" sparkle:edSignature="ndxcu6W3mMxYf3uvAlnhGXjUuqTtdhj9LyphFJ0eZrpB+jDge0OXX41oW7DgevzV2vn9DVNW0N+YepXtma1MCg==" length="2489238" type="application/octet-stream" sparkle:version="1702" sparkle:shortVersionString="0.17.2" />
+            <enclosure sparkle:cpu="x86_64" url="https://github.com/st0012/cctop/releases/download/v0.17.2/cctop-macOS-x86_64.zip" sparkle:edSignature="ndxcu6W3mMxYf3uvAlnhGXjUuqTtdhj9LyphFJ0eZrpB+jDge0OXX41oW7DgevzV2vn9DVNW0N+YepXtma1MCg==" length="2489238" type="application/octet-stream" sparkle:version="1702" sparkle:shortVersionString="0.17.2"/>
         </item>
         <item>
             <title>0.17.1</title>
@@ -58,25 +77,6 @@
             <sparkle:shortVersionString>0.17.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
             <enclosure sparkle:cpu="x86_64" url="https://github.com/st0012/cctop/releases/download/v0.17.0/cctop-macOS-x86_64.zip" sparkle:edSignature="M1g8QJwTsOqB+S6O5PqXLiBawjqtTp0nn1FoFrcbvcmdW8FgJECcxRISSFDR0djML6pvVXb9nT9qV+eeZts5BA==" length="2425440" type="application/octet-stream" sparkle:version="1700" sparkle:shortVersionString="0.17.0"/>
-        </item>
-        <item>
-            <title>0.16.0</title>
-            <pubDate>Fri, 15 May 2026 17:07:32 +0000</pubDate>
-            <link>https://raw.githubusercontent.com/st0012/cctop/master/appcast.xml</link>
-            <sparkle:version>1600</sparkle:version>
-            <sparkle:shortVersionString>0.16.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure sparkle:cpu="arm64" url="https://github.com/st0012/cctop/releases/download/v0.16.0/cctop-macOS-arm64.zip" length="2266277" type="application/octet-stream" sparkle:edSignature="m6SUcad7NCbB7DC5TMBV9N/uIG8h7mRSU3hnutl4egNuzIFzmDc2n7M/uBoqr5Oqm5wIiZQdsevaFF4wmLglDg=="/>
-        </item>
-        <item>
-            <title>0.16.0</title>
-            <pubDate>Fri, 15 May 2026 17:07:32 +0000</pubDate>
-            <link>https://raw.githubusercontent.com/st0012/cctop/master/appcast.xml</link>
-            <sparkle:version>1600</sparkle:version>
-            <sparkle:shortVersionString>0.16.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <enclosure sparkle:cpu="x86_64" url="https://github.com/st0012/cctop/releases/download/v0.16.0/cctop-macOS-x86_64.zip" sparkle:edSignature="6NR5O6nhXrNf+YkUGNwz6BOqSD+4PnN71uSZBgN8xK+nsvMkM+eLQhRfIjr9xDHDWPzlXMY3QN8r4ZizVKkMDQ==" length="2289648" type="application/octet-stream" sparkle:version="1600" sparkle:shortVersionString="0.16.0"/>
         </item>
         <item>
             <title>0.15.1</title>
