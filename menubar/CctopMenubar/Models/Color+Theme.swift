@@ -1,6 +1,38 @@
 import AppKit
 import SwiftUI
 
+enum AppChrome {
+    static let cornerRadius: CGFloat = 8
+    static let rowSelectionHorizontalInset: CGFloat = 6
+    static let panelCornerRadius: CGFloat = 16
+    static let controlCornerRadius = cornerRadius
+    static let selectionCornerRadius = panelCornerRadius - rowSelectionHorizontalInset
+    static let groupCornerRadius = cornerRadius
+    static let settingsContentPaddingHorizontal: CGFloat = 8
+    static let settingsContentPaddingTop: CGFloat = 10
+    static let settingsContentPaddingBottom: CGFloat = 28
+    static let settingsRowHorizontalPadding: CGFloat = 10
+    static let settingsSectionHeaderHorizontalPadding = settingsRowHorizontalPadding
+    static let settingsDividerLeadingPadding = settingsRowHorizontalPadding
+    static let settingsSegmentSpacing: CGFloat = 1
+    static let settingsSegmentedControlPadding: CGFloat = 2
+    static let settingsSegmentHorizontalPadding: CGFloat = 6
+    static let settingsSegmentHeight: CGFloat = 22
+    static let settingsSegmentedControlHeight = settingsSegmentHeight + settingsSegmentedControlPadding * 2
+    static let settingsSegmentSelectionCornerRadius = controlCornerRadius - settingsSegmentedControlPadding
+    static let overlayMinimumContentHeight: CGFloat = 290
+    static let overlayContentVerticalPadding: CGFloat = 8
+    static let settingsOverlayVerticalPadding: CGFloat = 0
+    static let settingsScrollViewportHeight = overlayMinimumContentHeight - settingsOverlayVerticalPadding * 2
+    static let settingsContentPadding = EdgeInsets(
+        top: settingsContentPaddingTop,
+        leading: settingsContentPaddingHorizontal,
+        bottom: settingsContentPaddingBottom,
+        trailing: settingsContentPaddingHorizontal
+    )
+    static let listVerticalPadding: CGFloat = 4
+}
+
 extension Color {
     /// Accent color — the primary brand color, themed per color scheme.
     static var amber: Color {
@@ -30,6 +62,13 @@ extension Color {
         })
     }
 
+    /// Text shown on accent-filled action buttons.
+    static var accentButtonText: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            ThemeManager.shared.current.accentButtonText.resolve(appearance)
+        })
+    }
+
     /// Settings section background.
     static var settingsBackground: Color {
         Color(nsColor: NSColor(name: nil) { appearance in
@@ -48,6 +87,69 @@ extension Color {
     static var panelBackground: Color {
         Color(nsColor: NSColor(name: nil) { appearance in
             ThemeManager.shared.current.panelBackground.resolve(appearance)
+        })
+    }
+
+    /// Subtle material wash layered over the panel base.
+    static var panelMaterialOverlay: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            ThemeManager.shared.current.panelMaterialOverlay.resolve(appearance)
+        })
+    }
+
+    /// Toolbar, tabs, footer, and small chrome controls.
+    static var panelControlBackground: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            ThemeManager.shared.current.panelControlBackground.resolve(appearance)
+        })
+    }
+
+    /// Hairline border for panel chrome.
+    static var panelControlBorder: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            ThemeManager.shared.current.panelControlBorder.resolve(appearance)
+        })
+    }
+
+    /// Accent-tinted hairline used for Option A selected surfaces and panel rim.
+    static var panelAccentBorder: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            ThemeManager.shared.current.panelAccentBorder.resolve(appearance)
+        })
+    }
+
+    /// Faint top light layered over selected controls.
+    static var selectionHighlightOverlay: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            ThemeManager.shared.current.selectionHighlightOverlay.resolve(appearance)
+        })
+    }
+
+    /// Rounded row and tab selection background.
+    static var panelSelectionBackground: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            ThemeManager.shared.current.panelSelectionBackground.resolve(appearance)
+        })
+    }
+
+    /// Sunk background for secondary grouped views.
+    static var groupedContentBackground: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            ThemeManager.shared.current.groupedContentBackground.resolve(appearance)
+        })
+    }
+
+    /// Grouped-list row background.
+    static var groupedRowBackground: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            ThemeManager.shared.current.groupedRowBackground.resolve(appearance)
+        })
+    }
+
+    /// Grouped-list separator and border.
+    static var groupedRowBorder: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            ThemeManager.shared.current.groupedRowBorder.resolve(appearance)
         })
     }
 
@@ -83,6 +185,13 @@ extension Color {
     static var statusGreen: Color {
         Color(nsColor: NSColor(name: nil) { appearance in
             ThemeManager.shared.current.statusGreen.resolve(appearance)
+        })
+    }
+
+    /// Idle status.
+    static var statusIdle: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            ThemeManager.shared.current.statusIdle.resolve(appearance)
         })
     }
 

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum PopupOverlay: Equatable {
@@ -23,20 +24,127 @@ struct CardSelectionStyle: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background(backgroundColor)
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-    }
-
-    private var backgroundColor: Color {
-        if isSelected { return Color.textPrimary.opacity(0.12) }
-        if isHovered { return Color.textPrimary.opacity(0.07) }
-        return .clear
+            .background {
+                SelectionSurfaceChrome(
+                    isSelected: isSelected,
+                    isHovered: isHovered,
+                    cornerRadius: cornerRadius
+                )
+            }
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .stroke(Color.panelAccentBorder, lineWidth: 1)
+                }
+            }
     }
 }
 
 extension View {
-    func cardSelectionStyle(isSelected: Bool, isHovered: Bool, cornerRadius: CGFloat = 6) -> some View {
+    func cardSelectionStyle(isSelected: Bool, isHovered: Bool, cornerRadius: CGFloat = AppChrome.selectionCornerRadius) -> some View {
         modifier(CardSelectionStyle(isSelected: isSelected, isHovered: isHovered, cornerRadius: cornerRadius))
+    }
+}
+
+struct SelectionSurfaceChrome: View {
+    let isSelected: Bool
+    let isHovered: Bool
+    let cornerRadius: CGFloat
+    var hoverColor = Color.panelSelectionBackground.opacity(0.62)
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        ZStack {
+            if isSelected {
+                shape.fill(Color.panelSelectionBackground)
+                shape.fill(selectionHighlight)
+            } else if isHovered {
+                shape.fill(hoverColor)
+            }
+        }
+    }
+
+    private var selectionHighlight: LinearGradient {
+        LinearGradient(
+            colors: [Color.selectionHighlightOverlay, Color.clear],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+}
+
+struct PanelAccentHairline: View {
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .stroke(accentGradient, lineWidth: 1)
+    }
+
+    private var accentGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color.panelAccentBorder,
+                Color.panelControlBorder,
+                Color.statusGreen.opacity(0.08),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+}
+
+struct PanelMaterialView: NSViewRepresentable {
+    var material: NSVisualEffectView.Material = .popover
+    var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = .active
+        view.isEmphasized = false
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = material
+        nsView.blendingMode = blendingMode
+        nsView.state = .active
+        nsView.isEmphasized = false
+    }
+}
+
+struct PanelTintBackground: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        ZStack {
+            Color.panelBackground.opacity(panelBackgroundOpacity)
+            Color.panelMaterialOverlay.opacity(panelOverlayOpacity)
+        }
+    }
+
+    private var panelBackgroundOpacity: Double {
+        colorScheme == .dark ? 0.72 : 0.58
+    }
+
+    private var panelOverlayOpacity: Double {
+        colorScheme == .dark ? 0.72 : 0.55
+    }
+}
+
+struct PanelSurfaceBackground: View {
+    var usesMaterial = true
+
+    var body: some View {
+        ZStack {
+            if usesMaterial {
+                PanelMaterialView()
+            }
+            PanelTintBackground()
+        }
     }
 }
 
@@ -75,14 +183,26 @@ struct TabButtonView: View {
                     .foregroundStyle(isSelected ? Color.textPrimary : Color.textMuted)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1)
-                    .background(isSelected ? Color.textPrimary.opacity(0.12) : Color.textPrimary.opacity(0.05))
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .background(Color.panelControlBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: AppChrome.controlCornerRadius, style: .continuous))
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
-            .background(isSelected || isHovered ? Color.textPrimary.opacity(0.1) : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .background {
+                SelectionSurfaceChrome(
+                    isSelected: isSelected,
+                    isHovered: isHovered,
+                    cornerRadius: AppChrome.controlCornerRadius,
+                    hoverColor: Color.panelControlBackground
+                )
+            }
+            .overlay {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: AppChrome.controlCornerRadius, style: .continuous)
+                        .stroke(Color.panelAccentBorder, lineWidth: 1)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: AppChrome.controlCornerRadius, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
@@ -113,8 +233,13 @@ struct PanelContentView: View {
             onLayoutChanged: onLayoutChanged
         )
         .frame(width: 320)
-        .background(Color.panelBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .background {
+            PanelSurfaceBackground()
+        }
+        .overlay {
+            PanelAccentHairline(cornerRadius: AppChrome.panelCornerRadius)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: AppChrome.panelCornerRadius, style: .continuous))
         .id(themeManager.themeId)
     }
 }
