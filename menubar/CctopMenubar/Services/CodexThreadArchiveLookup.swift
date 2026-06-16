@@ -16,20 +16,35 @@ protocol CodexThreadStateProviding {
 
 final class CodexThreadArchiveLookup {
     typealias RolloutOriginator = (String) -> String?
+    typealias StateDatabasePaths = () -> [String]
 
     private static let maxIndexCacheEntries = 8
+    private static let stateDatabasePathCacheDuration: TimeInterval = 1
 
-    let stateDatabasePath: String
+    private let stateDatabasePaths: StateDatabasePaths
     private let rolloutOriginator: RolloutOriginator
     private let cacheLock = NSLock()
     private var indexCaches: [CodexThreadStateRequestKey: CodexThreadStateIndexCache] = [:]
+    private var stateDatabasePathCache: (loadedAt: Date, paths: [String])?
 
     init(
-        stateDatabasePath: String = Config.codexStateDatabasePath(),
+        stateDatabasePaths: @escaping StateDatabasePaths = CodexThreadArchiveLookup.liveStateDatabasePaths,
         rolloutOriginator: @escaping RolloutOriginator = CodexThreadArchiveLookup.rolloutOriginator(at:)
     ) {
-        self.stateDatabasePath = stateDatabasePath
+        self.stateDatabasePaths = stateDatabasePaths
         self.rolloutOriginator = rolloutOriginator
+    }
+
+    init(
+        stateDatabasePath: String,
+        rolloutOriginator: @escaping RolloutOriginator = CodexThreadArchiveLookup.rolloutOriginator(at:)
+    ) {
+        self.stateDatabasePaths = { [stateDatabasePath] }
+        self.rolloutOriginator = rolloutOriginator
+    }
+
+    private static func liveStateDatabasePaths() -> [String] {
+        Config.codexStateDatabaseCandidates(desktopSQLiteHome: CodexDesktopRuntimeProbe().currentDesktopSQLiteHome())
     }
 
     /// Returns the subset of `threadIDs` present in Codex's thread state. Unlike archive
@@ -101,107 +116,6 @@ final class CodexThreadArchiveLookup {
         }
     }
 
-    private func stateSnapshot(matching threadIDs: Set<String>) -> CodexThreadStateSnapshot? {
-        guard let databaseFingerprint = Self.databaseFingerprint(at: stateDatabasePath) else {
-            return nil
-        }
-
-        let requestedThreadIDs = Set(threadIDs)
-        let key = CodexThreadStateRequestKey(database: databaseFingerprint, threadIDs: requestedThreadIDs)
-
-        let cacheCandidates: [CodexThreadStateIndexCache]
-        cacheLock.lock()
-        cacheCandidates = indexCaches.compactMap { entry in
-            entry.key.database == databaseFingerprint && entry.key.threadIDs.isSuperset(of: requestedThreadIDs) ? entry.value : nil
-        }
-        cacheLock.unlock()
-
-        if let cached = cacheCandidates.first(where: { cached in
-            Self.rolloutFileFingerprints(at: cached.rolloutPaths) == cached.rolloutFingerprints
-        }) {
-            return cached.snapshot
-        }
-
-        guard let result = loadStateSnapshot(for: databaseFingerprint, matching: requestedThreadIDs) else {
-            return nil
-        }
-
-        cacheLock.lock()
-        indexCaches = indexCaches.filter { $0.key.database == databaseFingerprint }
-        if indexCaches.count >= Self.maxIndexCacheEntries {
-            indexCaches.removeAll(keepingCapacity: true)
-        }
-        indexCaches[key] = CodexThreadStateIndexCache(
-            snapshot: result.snapshot,
-            rolloutPaths: result.rolloutPaths,
-            rolloutFingerprints: result.rolloutFingerprints
-        )
-        cacheLock.unlock()
-        return result.snapshot
-    }
-
-    private func loadStateSnapshot(
-        for fingerprint: CodexThreadStateDatabaseFingerprint,
-        matching threadIDs: Set<String>
-    ) -> CodexThreadStateLoadResult? {
-        guard !threadIDs.isEmpty else {
-            return CodexThreadStateLoadResult(snapshot: .available(CodexThreadStateIndex()), rolloutPaths: [], rolloutFingerprints: [])
-        }
-        guard fingerprint != .missing else {
-            return CodexThreadStateLoadResult(snapshot: .missing, rolloutPaths: [], rolloutFingerprints: [])
-        }
-
-        var database: OpaquePointer?
-        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
-        guard sqlite3_open_v2(stateDatabasePath, &database, flags, nil) == SQLITE_OK,
-              let database else {
-            if database != nil { sqlite3_close(database) }
-            return nil
-        }
-        defer { sqlite3_close(database) }
-        sqlite3_busy_timeout(database, 50)
-
-        let sortedThreadIDs = threadIDs.sorted()
-        guard let sql = Self.threadSnapshotSQL(in: database, matchingCount: sortedThreadIDs.count) else {
-            return nil
-        }
-
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
-              let statement else {
-            return nil
-        }
-        defer { sqlite3_finalize(statement) }
-
-        guard Self.bind(sortedThreadIDs, to: statement) else { return nil }
-        return stateSnapshotRows(from: statement)
-    }
-
-    private func stateSnapshotRows(from statement: OpaquePointer) -> CodexThreadStateLoadResult? {
-        var index = CodexThreadStateIndex()
-        var rolloutPaths = Set<String>()
-        var rolloutFingerprints: [String: CodexThreadStateRolloutFileFingerprint] = [:]
-        while true {
-            switch sqlite3_step(statement) {
-            case SQLITE_ROW:
-                addCurrentRow(
-                    statement,
-                    to: &index,
-                    rolloutPaths: &rolloutPaths,
-                    rolloutFingerprints: &rolloutFingerprints
-                )
-            case SQLITE_DONE:
-                return CodexThreadStateLoadResult(
-                    snapshot: .available(index),
-                    rolloutPaths: rolloutPaths,
-                    rolloutFingerprints: Self.sortedRolloutFingerprints(rolloutFingerprints)
-                )
-            default:
-                return nil   // SQLITE_BUSY / SQLITE_ERROR / etc. — read did not complete
-            }
-        }
-    }
-
     private static func threadSnapshotSQL(in database: OpaquePointer, matchingCount: Int) -> String? {
         guard let columns = threadColumns(in: database),
               columns.contains("id") else {
@@ -245,11 +159,7 @@ final class CodexThreadArchiveLookup {
         }
     }
 
-    private static func selectColumn(
-        _ name: String,
-        from columns: Set<String>,
-        defaultingTo fallback: String
-    ) -> String {
+    private static func selectColumn(_ name: String, from columns: Set<String>, defaultingTo fallback: String) -> String {
         columns.contains(name) ? name : "\(fallback) AS \(name)"
     }
 
@@ -262,17 +172,16 @@ final class CodexThreadArchiveLookup {
         return true
     }
 
-    private static func rolloutFileFingerprints(at paths: Set<String>) -> [CodexThreadStateRolloutFileFingerprint] {
+    static func rolloutFileFingerprints(at paths: Set<String>) -> [CodexThreadStateRolloutFileFingerprint] {
         paths.sorted().map { rolloutFileFingerprint(at: $0) }
     }
 
-    private static func rolloutFileFingerprint(at path: String) -> CodexThreadStateRolloutFileFingerprint {
+    static func rolloutFileFingerprint(at path: String) -> CodexThreadStateRolloutFileFingerprint {
         CodexThreadStateRolloutFileFingerprint(path: path, file: optionalFileFingerprint(at: path))
     }
 
-    private static func sortedRolloutFingerprints(
-        _ fingerprintsByPath: [String: CodexThreadStateRolloutFileFingerprint]
-    ) -> [CodexThreadStateRolloutFileFingerprint] {
+    private static func sortedRolloutFingerprints(_ fingerprintsByPath: [String: CodexThreadStateRolloutFileFingerprint])
+        -> [CodexThreadStateRolloutFileFingerprint] {
         fingerprintsByPath.keys.sorted().compactMap { fingerprintsByPath[$0] }
     }
 
@@ -309,14 +218,21 @@ final class CodexThreadArchiveLookup {
     private func addCurrentRow(
         _ statement: OpaquePointer,
         to index: inout CodexThreadStateIndex,
-        rolloutPaths: inout Set<String>,
-        rolloutFingerprints: inout [String: CodexThreadStateRolloutFileFingerprint]
+        rolloutTracker: inout CodexThreadStateRolloutTracker
     ) {
         guard let idText = sqlite3_column_text(statement, 0) else { return }
         let threadID = String(cString: idText)
         index.existingThreadIDs.insert(threadID)
 
-        if sqlite3_column_int(statement, 1) == 1 {
+        let rolloutPath = Self.columnString(statement, 5)
+        let archiveState = Self.archiveState(
+            sqliteArchived: sqlite3_column_int(statement, 1) == 1,
+            rolloutPath: rolloutPath
+        )
+        archiveState.observedFingerprints.values.forEach {
+            trackRolloutFingerprint($0, rolloutTracker: &rolloutTracker)
+        }
+        if archiveState.isArchived {
             index.archivedThreadIDs.insert(threadID)
         }
 
@@ -327,9 +243,9 @@ final class CodexThreadArchiveLookup {
         addExecHelperRow(
             threadID,
             statement: statement,
+            archiveState: archiveState,
             to: &index,
-            rolloutPaths: &rolloutPaths,
-            rolloutFingerprints: &rolloutFingerprints
+            rolloutTracker: &rolloutTracker
         )
         Self.addProjectNameRow(threadID, statement: statement, to: &index)
     }
@@ -337,21 +253,26 @@ final class CodexThreadArchiveLookup {
     private func addExecHelperRow(
         _ threadID: String,
         statement: OpaquePointer,
+        archiveState: CodexThreadArchiveState,
         to index: inout CodexThreadStateIndex,
-        rolloutPaths: inout Set<String>,
-        rolloutFingerprints: inout [String: CodexThreadStateRolloutFileFingerprint]
+        rolloutTracker: inout CodexThreadStateRolloutTracker
     ) {
         let source = Self.columnString(statement, 3)
         let hasUserEvent = sqlite3_column_int(statement, 4) != 0
+        let rolloutPath = Self.columnString(statement, 5)
         guard source == "exec",
               !hasUserEvent,
-              let rolloutPath = Self.columnString(statement, 5) else {
+              let rolloutPath else {
             return
         }
 
-        rolloutPaths.insert(rolloutPath)
-        rolloutFingerprints[rolloutPath] = Self.rolloutFileFingerprint(at: rolloutPath)
-        if rolloutOriginator(rolloutPath) == "Codex Desktop" {
+        let originatorPath = archiveState.existingRolloutPath ?? rolloutPath
+        if let rolloutFingerprint = archiveState.observedFingerprints[originatorPath] {
+            trackRolloutFingerprint(rolloutFingerprint, rolloutTracker: &rolloutTracker)
+        } else {
+            trackRolloutPath(originatorPath, rolloutTracker: &rolloutTracker)
+        }
+        if rolloutOriginator(originatorPath) == "Codex Desktop" {
             index.execHelperThreadIDs.insert(threadID)
         }
     }
@@ -364,9 +285,145 @@ final class CodexThreadArchiveLookup {
             index.projectNamesByThreadID[threadID] = name
         }
     }
+
 }
 
 private extension CodexThreadArchiveLookup {
+    func stateSnapshot(matching threadIDs: Set<String>) -> CodexThreadStateSnapshot? {
+        var remainingThreadIDs = Set(threadIDs)
+        var mergedIndex = CodexThreadStateIndex()
+        var foundReadableDatabase = false
+
+        for path in resolvedStateDatabasePaths() where !remainingThreadIDs.isEmpty {
+            guard let snapshot = stateSnapshot(at: path, matching: remainingThreadIDs) else {
+                return nil
+            }
+            guard case .available(let index) = snapshot else {
+                continue
+            }
+            foundReadableDatabase = true
+            mergedIndex.merge(index)
+            remainingThreadIDs.subtract(index.existingThreadIDs)
+        }
+
+        return foundReadableDatabase ? .available(mergedIndex) : .missing
+    }
+
+    func resolvedStateDatabasePaths() -> [String] {
+        let now = Date()
+        cacheLock.lock()
+        if let cache = stateDatabasePathCache,
+           now.timeIntervalSince(cache.loadedAt) < Self.stateDatabasePathCacheDuration {
+            cacheLock.unlock()
+            return cache.paths
+        }
+        cacheLock.unlock()
+
+        let paths = stateDatabasePaths()
+        cacheLock.lock()
+        stateDatabasePathCache = (loadedAt: now, paths: paths)
+        cacheLock.unlock()
+        return paths
+    }
+
+    func stateSnapshot(at path: String, matching threadIDs: Set<String>) -> CodexThreadStateSnapshot? {
+        guard let databaseFingerprint = Self.databaseFingerprint(at: path) else { return nil }
+        let requestedThreadIDs = Set(threadIDs)
+        let key = CodexThreadStateRequestKey(database: databaseFingerprint, threadIDs: requestedThreadIDs)
+
+        let cacheCandidates: [CodexThreadStateIndexCache]
+        cacheLock.lock()
+        cacheCandidates = indexCaches.compactMap { entry in
+            entry.key.database == databaseFingerprint && entry.key.threadIDs.isSuperset(of: requestedThreadIDs) ? entry.value : nil
+        }
+        cacheLock.unlock()
+
+        if let cached = cacheCandidates.first(where: { cached in
+            Self.rolloutFileFingerprints(at: cached.rolloutPaths) == cached.rolloutFingerprints
+        }) {
+            return cached.snapshot
+        }
+
+        guard let result = loadStateSnapshot(at: path, for: databaseFingerprint, matching: requestedThreadIDs) else {
+            return nil
+        }
+
+        cacheLock.lock()
+        if indexCaches.count >= Self.maxIndexCacheEntries {
+            indexCaches.removeAll(keepingCapacity: true)
+        }
+        indexCaches[key] = CodexThreadStateIndexCache(
+            snapshot: result.snapshot,
+            rolloutPaths: result.rolloutPaths,
+            rolloutFingerprints: result.rolloutFingerprints
+        )
+        cacheLock.unlock()
+        return result.snapshot
+    }
+
+    func loadStateSnapshot(at path: String, for fingerprint: CodexThreadStateDatabaseFingerprint, matching threadIDs: Set<String>)
+        -> CodexThreadStateLoadResult? {
+        guard !threadIDs.isEmpty else {
+            return CodexThreadStateLoadResult(snapshot: .available(CodexThreadStateIndex()), rolloutPaths: [], rolloutFingerprints: [])
+        }
+        guard fingerprint != .missing else {
+            return CodexThreadStateLoadResult(snapshot: .missing, rolloutPaths: [], rolloutFingerprints: [])
+        }
+
+        var database: OpaquePointer?
+        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
+        guard sqlite3_open_v2(path, &database, flags, nil) == SQLITE_OK,
+              let database else {
+            if database != nil { sqlite3_close(database) }
+            return nil
+        }
+        defer { sqlite3_close(database) }
+        sqlite3_busy_timeout(database, 50)
+
+        let sortedThreadIDs = threadIDs.sorted()
+        guard let sql = Self.threadSnapshotSQL(in: database, matchingCount: sortedThreadIDs.count) else {
+            return nil
+        }
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            return nil
+        }
+        defer { sqlite3_finalize(statement) }
+
+        guard Self.bind(sortedThreadIDs, to: statement) else { return nil }
+        return stateSnapshotRows(from: statement)
+    }
+
+    func stateSnapshotRows(from statement: OpaquePointer) -> CodexThreadStateLoadResult? {
+        var index = CodexThreadStateIndex()
+        var rolloutTracker = CodexThreadStateRolloutTracker()
+        while true {
+            switch sqlite3_step(statement) {
+            case SQLITE_ROW:
+                addCurrentRow(statement, to: &index, rolloutTracker: &rolloutTracker)
+            case SQLITE_DONE:
+                return CodexThreadStateLoadResult(
+                    snapshot: .available(index),
+                    rolloutPaths: rolloutTracker.paths,
+                    rolloutFingerprints: Self.sortedRolloutFingerprints(rolloutTracker.fingerprints)
+                )
+            default:
+                return nil   // SQLITE_BUSY / SQLITE_ERROR / etc. — read did not complete
+            }
+        }
+    }
+
+    func trackRolloutPath(_ path: String, rolloutTracker: inout CodexThreadStateRolloutTracker) {
+        trackRolloutFingerprint(Self.rolloutFileFingerprint(at: path), rolloutTracker: &rolloutTracker)
+    }
+
+    func trackRolloutFingerprint(_ fingerprint: CodexThreadStateRolloutFileFingerprint, rolloutTracker: inout CodexThreadStateRolloutTracker) {
+        rolloutTracker.paths.insert(fingerprint.path)
+        rolloutTracker.fingerprints[fingerprint.path] = fingerprint
+    }
+
     private static func projectName(fromGitOriginURL origin: String) -> String? {
         let trimmed = origin.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -439,58 +496,3 @@ private extension CodexThreadArchiveLookup {
 }
 
 extension CodexThreadArchiveLookup: CodexThreadStateProviding {}
-
-private struct CodexThreadStateRequestKey: Hashable {
-    let database: CodexThreadStateDatabaseFingerprint
-    let threadIDs: Set<String>
-}
-
-private struct CodexThreadStateIndexCache {
-    let snapshot: CodexThreadStateSnapshot
-    let rolloutPaths: Set<String>
-    let rolloutFingerprints: [CodexThreadStateRolloutFileFingerprint]
-}
-
-private struct CodexThreadStateLoadResult {
-    let snapshot: CodexThreadStateSnapshot
-    let rolloutPaths: Set<String>
-    let rolloutFingerprints: [CodexThreadStateRolloutFileFingerprint]
-}
-
-private enum CodexThreadStateSnapshot {
-    case missing
-    case available(CodexThreadStateIndex)
-}
-
-private struct CodexThreadStateIndex {
-    var existingThreadIDs: Set<String> = []
-    var archivedThreadIDs: Set<String> = []
-    var subagentThreadIDs: Set<String> = []
-    var execHelperThreadIDs: Set<String> = []
-    var projectNamesByThreadID: [String: String] = [:]
-}
-
-private enum CodexThreadStateDatabaseFingerprint: Equatable, Hashable {
-    case missing
-    case file(
-        database: CodexThreadStateFileFingerprint,
-        wal: CodexThreadStateFileFingerprint?,
-        shm: CodexThreadStateFileFingerprint?
-    )
-}
-
-private struct CodexThreadStateRolloutFileFingerprint: Equatable {
-    let path: String
-    let file: CodexThreadStateFileFingerprint?
-}
-
-private struct CodexThreadStateFileFingerprint: Equatable, Hashable {
-    let deviceID: Int64
-    let fileID: UInt64
-    let modifiedSeconds: Int64
-    let modifiedNanoseconds: Int64
-    let statusChangedSeconds: Int64
-    let statusChangedNanoseconds: Int64
-    let fileSize: Int64
-}
-private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)

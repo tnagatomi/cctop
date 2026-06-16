@@ -22,10 +22,10 @@ class SessionManager: ObservableObject {
     private var lastDisplaySignature = SessionDisplayPolicy.Signature.empty
     var lastLoadLogSignature: SessionLoadLogSignature?
     var sessionFileCache: [String: SessionFileCacheEntry] = [:]
-
     /// Lifecycle windows: desktop app liveness decides connection when available; `active` is the
     /// fallback recency threshold and `retention` controls dormant desktop cleanup.
     nonisolated static let lifecycleWindows = LifecycleWindows(active: 600, retention: 1_209_600)
+    nonisolated static let codexMissingThreadGraceSeconds: TimeInterval = 10
 
     /// `startMonitoring: false` skips the directory watcher and the periodic timers so tests can
     /// drive `loadSessions()`/`garbageCollectFinished()` explicitly without background reloads.
@@ -99,7 +99,6 @@ class SessionManager: ObservableObject {
             .filter { $0.session.lifecycle != .finished }
             .map { adjustDisplayStatus($0.session) }
         let displaySignature = SessionDisplayPolicy.signature(for: newSessions, now: now)
-
         sendTransitionNotifications(for: newSessions, oldStatuses: oldStatuses)
         // Only publish when data actually changed, or when the presentation bucket changed
         // because an active idle session crossed the stale-idle threshold.
@@ -349,12 +348,12 @@ class SessionManager: ObservableObject {
 
     /// Returns the direct child PIDs of the given process.
     private func listChildPids(pid: UInt32) -> [pid_t] {
-        let size = proc_listchildpids(pid_t(pid), nil, 0)
-        guard size > 0 else { return [] }
-        let count = Int(size) / MemoryLayout<pid_t>.size
+        let reportedCount = proc_listchildpids(pid_t(pid), nil, 0)
+        let count = ProcessChildPIDProbe.capacity(fromReportedCount: reportedCount)
+        guard count > 0 else { return [] }
         var pids = [pid_t](repeating: 0, count: count)
-        let actual = proc_listchildpids(pid_t(pid), &pids, size)
-        let actualCount = Int(actual) / MemoryLayout<pid_t>.size
+        let actual = proc_listchildpids(pid_t(pid), &pids, ProcessChildPIDProbe.bufferSize(forCapacity: count))
+        let actualCount = ProcessChildPIDProbe.returnedCount(actual, capacity: count)
         return Array(pids.prefix(actualCount))
     }
 
