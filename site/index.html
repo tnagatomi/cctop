@@ -44,10 +44,7 @@
   html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); line-height: 1.55; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
   body {
     overflow-x: clip;
-    background:
-      radial-gradient(circle at 12% -6%, rgba(247, 118, 142, 0.12), transparent 30rem),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0) 30rem),
-      var(--bg);
+    background: var(--bg);
   }
   img, svg, video { max-width: 100%; height: auto; }
   img { display: block; }
@@ -240,14 +237,29 @@
   }
 
   @media (max-width: 640px) {
-    .site-shell { width: min(100% - 20px, 1240px); margin: 10px auto; border-radius: 16px; }
+    .site-shell {
+      width: 100%;
+      margin: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
     .wrap { width: min(100% - 24px, 1120px); }
-    .site-nav { height: auto; padding: 14px 0; align-items: start; }
+    .site-nav { height: auto; padding: 14px 0; align-items: center; }
     .nav-actions { flex-wrap: wrap; }
     .hero { padding: 34px 0 48px; }
     .hero h1 { font-size: clamp(42px, 16vw, 68px); }
     .hero p { font-size: 16px; }
-    .status-pill { align-items: flex-start; flex-direction: column; }
+    .release-note {
+      display: grid;
+      gap: 4px;
+      align-items: start;
+      margin-top: 18px;
+    }
+    .release-note span { display: block; }
+    .status-pill { max-width: 100%; }
+    .status-bars { width: clamp(112px, 42vw, 154px); flex: 0 1 clamp(112px, 42vw, 154px); }
     .section { padding: 52px 0; }
     .tool-grid, .theme-grid { grid-template-columns: 1fr; }
     .tier-row { grid-template-columns: 1fr; gap: 10px; padding: 15px; }
@@ -328,11 +340,11 @@
           <a class="tool-card" href="https://github.com/badlogic/pi-mono" target="_blank" rel="noopener noreferrer"><strong>pi <span class="arrow">&nearr;</span></strong><span>pi extension events</span></a>
         </div>
         <div class="tier-list panel-card">
-          <div class="tier-row"><div><strong>Targets the exact session</strong><small>right window, tab, and pane - or the specific thread in a desktop app</small></div><div class="chips"><span class="chip">iTerm2</span><span class="chip">cmux<sup>&sect;</sup></span><span class="chip">Kitty<sup>*</sup></span><span class="chip">Ghostty<sup>&dagger;</sup></span><span class="chip">Terminal<sup>&Dagger;</sup></span><span class="chip">Codex Desktop</span><span class="chip">Zellij</span><span class="chip">tmux</span></div></div>
+          <div class="tier-row"><div><strong>Targets the exact session</strong><small>right window, tab, and pane - or the specific thread in a desktop app</small></div><div class="chips"><span class="chip">iTerm2</span><span class="chip">cmux</span><span class="chip">Kitty<sup>*</sup></span><span class="chip">Ghostty<sup>&dagger;</sup></span><span class="chip">Terminal<sup>&Dagger;</sup></span><span class="chip">Codex Desktop</span><span class="chip">Zellij</span><span class="chip">tmux</span></div></div>
           <div class="tier-row"><div><strong>Opens the project</strong><small>focuses the editor window, using the workspace file if present</small></div><div class="chips"><span class="chip">VS Code</span><span class="chip">Cursor</span><span class="chip">Windsurf</span><span class="chip">Zed</span></div></div>
           <div class="tier-row"><div><strong>Activates the app</strong><small>raises the app; find the tab manually</small></div><div class="chips"><span class="chip">Claude Desktop</span><span class="chip">Warp</span></div></div>
         </div>
-        <p class="tier-footnote">*&thinsp;Kitty targets the exact window when <a href="https://sw.kovidgoyal.net/kitty/remote-control/" target="_blank" rel="noopener noreferrer"><code>remote control</code></a> is enabled in kitty.conf. Without it, falls back to app activation.<br>&sect;&thinsp;cmux targets the exact workspace surface using <a href="https://cmux.com/docs/api" target="_blank" rel="noopener noreferrer">workspace and surface IDs</a> from stored session data or the live cmux process, so already-running sessions can jump correctly without restart.<br>&dagger;&thinsp;Ghostty 1.3.0+ targets a terminal by working directory via AppleScript. Ambiguous if multiple Ghostty splits share the same cwd; falls back to app activation otherwise.<br>&Dagger;&thinsp;Apple Terminal targets the tab by tty via AppleScript. Falls back to app activation inside a multiplexer (tmux, screen), where the captured tty is the multiplexer pane's pty rather than the Terminal tab's.</p>
+        <p class="tier-footnote">*&thinsp;Kitty targets the exact window when <a href="https://sw.kovidgoyal.net/kitty/remote-control/" target="_blank" rel="noopener noreferrer"><code>remote control</code></a> is enabled in kitty.conf. Without it, falls back to app activation.<br>&dagger;&thinsp;Ghostty 1.3.0+ targets a terminal by working directory via AppleScript. Ambiguous if multiple Ghostty splits share the same cwd; falls back to app activation otherwise.<br>&Dagger;&thinsp;Apple Terminal targets the tab by tty via AppleScript. Falls back to app activation inside a multiplexer (tmux, screen), where the captured tty is the multiplexer pane's pty rather than the Terminal tab's.</p>
       </div>
     </section>
 
