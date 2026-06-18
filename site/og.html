@@ -2,89 +2,219 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>cctop — social preview source (1200×630)</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@600&family=IBM+Plex+Sans:wght@600&display=swap" rel="stylesheet">
+<title>cctop social preview source (1200x630)</title>
 <style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  html,body{width:1200px;height:630px}
-  body{
-    background:#1a1b26;
-    color:#c0caf5;
-    font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif;
-    -webkit-font-smoothing:antialiased;
-    position:relative;
-    overflow:hidden;
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1200px; height: 630px; }
+  body {
+    background: #1a1b26;
+    color: #c0caf5;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow: hidden;
+    position: relative;
   }
 
-  .wordmark{
-    position:absolute;
-    top:60px;left:80px;
-    font-family:'IBM Plex Mono','SF Mono',Menlo,monospace;
-    font-size:80px;font-weight:600;
-    letter-spacing:-0.04em;line-height:1;
-    color:#c0caf5;
-  }
-  .wordmark .caret{color:#ff9e64}
-
-  .tagline{
-    position:absolute;
-    top:188px;left:80px;
-    width:540px;
-    font-size:54px;font-weight:600;
-    color:#c0caf5;
-    line-height:1.08;letter-spacing:-0.025em;
-  }
-  .tagline .accent{color:#ff9e64}
-
-  .stamp{
-    position:absolute;
-    bottom:60px;left:80px;
-    height:24px;
-    display:flex;align-items:center;gap:14px;
-  }
-  .stamp .line{
-    width:32px;height:2px;
-    background:#ff9e64;border-radius:1px;
-    flex:0 0 auto;
-  }
-  .stamp .label{
-    font-family:'IBM Plex Mono','SF Mono',Menlo,monospace;
-    font-size:18px;font-weight:600;
-    line-height:24px;
-    color:#a9b1d6;
-    letter-spacing:0.10em;text-transform:uppercase;
+  .shell {
+    position: absolute;
+    inset: 34px 40px;
+    border: 1px solid rgba(247, 118, 142, 0.16);
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.014);
+    box-shadow: 0 30px 90px rgba(0, 0, 0, 0.28);
+    overflow: hidden;
   }
 
-  .frame{
-    position:absolute;
-    top:60px;right:80px;
-    height:510px;
-    background:#24283b;
-    border:1px solid rgba(192,202,245,0.12);
-    border-radius:18px;
-    padding:14px;
-    box-shadow:
-      0 30px 60px -20px rgba(0,0,0,0.6),
-      0 0 0 1px rgba(0,0,0,0.4);
+  .nav {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 70px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 42px;
+    border-bottom: 1px solid rgba(192, 202, 245, 0.12);
   }
-  .frame img{
-    display:block;
-    height:482px;width:auto;
-    border-radius:10px;
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 24px;
+    font-weight: 760;
+    line-height: 1;
+    color: #c0caf5;
+  }
+  .brand-mark {
+    width: 6px;
+    height: 32px;
+    border-radius: 999px;
+    background: #f7768e;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  }
+  .nav-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #9aa5ce;
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 14px;
+    font-weight: 650;
+  }
+  .nav-chip {
+    padding: 8px 12px;
+    border: 1px solid rgba(192, 202, 245, 0.16);
+    border-radius: 10px;
+    background: #202231;
+  }
+  .nav-chip.hot {
+    background: #f7768e;
+    border-color: transparent;
+    color: #14151d;
+  }
+
+  .hero {
+    position: absolute;
+    top: 70px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 348px;
+    gap: 40px;
+    padding: 42px 42px 38px;
+    align-items: center;
+  }
+
+  .status-pill {
+    width: max-content;
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 12px 10px 14px;
+    border: 1px solid rgba(192, 202, 245, 0.20);
+    border-radius: 10px;
+    background: #202231;
+    color: #9aa5ce;
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .status-bars {
+    width: 178px;
+    height: 12px;
+    display: flex;
+    overflow: hidden;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: #16161e;
+  }
+  .status-bars span { display: block; height: 100%; }
+  .bar-ok { width: 42%; background: #9ece6a; }
+  .bar-wait { width: 18%; background: #ff9e64; }
+  .bar-perm { width: 14%; background: #f7768e; }
+  .bar-idle { width: 26%; background: #707895; }
+
+  h1 {
+    margin-top: 24px;
+    max-width: 590px;
+    color: #c0caf5;
+    font-size: 58px;
+    font-weight: 790;
+    line-height: 1;
+  }
+  .accent { color: #f7768e; }
+  .subhead {
+    margin-top: 20px;
+    max-width: 520px;
+    color: #9aa5ce;
+    font-size: 24px;
+    font-weight: 560;
+    line-height: 1.28;
+  }
+
+  .tools {
+    margin-top: 22px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .tool {
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
+    padding: 7px 10px;
+    border: 1px solid rgba(192, 202, 245, 0.14);
+    border-radius: 10px;
+    background: #16161e;
+    color: #c0caf5;
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .shot-frame {
+    align-self: center;
+    border-radius: 20px;
+    border: 1px solid rgba(192, 202, 245, 0.12);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018)), #202231;
+    padding: 14px;
+    box-shadow: 0 28px 78px rgba(0, 0, 0, 0.34);
+  }
+  .shot-crop {
+    height: 376px;
+    overflow: hidden;
+    border-radius: 14px;
+  }
+  .shot-frame img {
+    display: block;
+    width: 100%;
+  }
+  .caption {
+    margin-top: 11px;
+    color: #707895;
+    text-align: center;
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1;
   }
 </style>
 </head>
 <body>
-  <div class="wordmark">cctop<span class="caret">_</span></div>
-  <div class="tagline">Keep an eye on every <span class="accent">AI coding session.</span></div>
-  <div class="stamp">
-    <span class="line"></span>
-    <span class="label">cctop.app</span>
-  </div>
-  <div class="frame">
-    <img src="https://raw.githubusercontent.com/st0012/cctop/master/docs/menubar-tokyonight-dark.png" alt="">
+  <div class="shell">
+    <div class="nav">
+      <div class="brand"><span class="brand-mark"></span><span>cctop</span></div>
+      <div class="nav-meta"><span class="nav-chip">macOS menubar</span><span class="nav-chip hot">cctop.app</span></div>
+    </div>
+    <main class="hero">
+      <section>
+        <div class="status-pill">
+          <span>cctop status</span>
+          <span class="status-bars"><span class="bar-ok"></span><span class="bar-wait"></span><span class="bar-perm"></span><span class="bar-idle"></span></span>
+        </div>
+        <h1>Monitor and jump between <span class="accent">AI coding sessions.</span></h1>
+        <p class="subhead">See what needs attention. Jump back with a keystroke.</p>
+        <div class="tools">
+          <span class="tool">Claude Code</span>
+          <span class="tool">Codex</span>
+          <span class="tool">opencode</span>
+          <span class="tool">pi</span>
+        </div>
+      </section>
+      <aside>
+        <div class="shot-frame">
+          <div class="shot-crop">
+            <img src="https://raw.githubusercontent.com/st0012/cctop/master/docs/menubar-tokyonight-dark.png" alt="">
+          </div>
+        </div>
+        <div class="caption">Tokyo Night theme</div>
+      </aside>
+    </main>
   </div>
 </body>
 </html>
