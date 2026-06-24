@@ -50,10 +50,10 @@ Works with your existing editor, terminal, and workflow.
 
 | Tool | Status | How it connects |
 |------|--------|-----------------|
-| [Claude Code / Claude Desktop](https://docs.anthropic.com/en/docs/claude-code) | Supported | Claude plugin + event hooks |
+| [Claude Code / Claude Desktop](https://code.claude.com/docs) | Supported | Claude plugin + event hooks |
 | [opencode](https://opencode.ai) | Supported | opencode plugin events |
-| [pi](https://github.com/badlogic/pi-mono) | Supported | pi extension events |
-| [Codex CLI / Codex Desktop](https://github.com/openai/codex) | Supported | Codex event hooks + trust step |
+| [pi](https://pi.dev/) | Supported | pi extension events |
+| [Codex CLI / Codex Desktop](https://developers.openai.com/codex) | Supported | Codex event hooks + trust step |
 
 ### Supported Editors & Terminals
 
