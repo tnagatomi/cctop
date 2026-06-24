@@ -1,0 +1,128 @@
+[
+  {
+    "id": "claude-code",
+    "label": "Claude Code",
+    "file": "claude-code.svg",
+    "format": "svg",
+    "source": "Claude Code mark extracted from the official docs SVG wordmark",
+    "source_url": "https://mintcdn.com/claude-code/c5r9_6tjPMzFdDDT/logo/dark.svg?fit=max&auto=format&n=c5r9_6tjPMzFdDDT&q=85&s=1298a0c3b3a1da603b190d0de0e31712"
+  },
+  {
+    "id": "claude",
+    "label": "Claude",
+    "file": "claude.svg",
+    "format": "svg",
+    "source": "Simple Icons Claude SVG, matching the previously inlined site symbol",
+    "source_url": "https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/claude.svg"
+  },
+  {
+    "id": "openai",
+    "label": "OpenAI / Codex",
+    "file": "openai.svg",
+    "format": "svg",
+    "source": "Extracted from the previously inlined site symbol"
+  },
+  {
+    "id": "opencode",
+    "label": "opencode",
+    "file": "opencode.svg",
+    "format": "svg",
+    "source": "Extracted from the previously inlined site wordmark"
+  },
+  {
+    "id": "pi",
+    "label": "pi",
+    "file": "pi.svg",
+    "format": "svg",
+    "source": "Fixed-color variant of the first-party Pi SVG shape",
+    "source_url": "https://pi.dev/logo.svg"
+  },
+  {
+    "id": "cmux",
+    "label": "cmux",
+    "file": "cmux.svg",
+    "format": "svg",
+    "source": "cmux icon",
+    "source_url": "https://cmux.com/cmux-icon.svg"
+  },
+  {
+    "id": "iterm2",
+    "label": "iTerm2",
+    "file": "iterm2.png",
+    "format": "png",
+    "source": "iTerm2 app icon from the upstream repository",
+    "source_url": "https://gitlab.com/gnachman/iterm2/-/raw/master/images/AppIcon/release.png"
+  },
+  {
+    "id": "kitty",
+    "label": "Kitty",
+    "file": "kitty.svg",
+    "format": "svg",
+    "source": "Kitty logo from the upstream repository",
+    "source_url": "https://raw.githubusercontent.com/kovidgoyal/kitty/master/logo/kitty.svg"
+  },
+  {
+    "id": "ghostty",
+    "label": "Ghostty",
+    "file": "ghostty.svg",
+    "format": "svg",
+    "source": "Ghostty logo from the website repository",
+    "source_url": "https://raw.githubusercontent.com/ghostty-org/website/main/public/ghostty-logo.svg",
+    "notes": "More restrictive upstream icon reuse signals than most entries; keep use informational and revisit before broader promotional reuse."
+  },
+  {
+    "id": "zellij",
+    "label": "Zellij",
+    "file": "zellij.svg",
+    "format": "svg",
+    "source": "Zellij logo from the upstream repository",
+    "source_url": "https://raw.githubusercontent.com/zellij-org/zellij/main/assets/logo.svg"
+  },
+  {
+    "id": "tmux",
+    "label": "tmux",
+    "file": "tmux.svg",
+    "format": "svg",
+    "source": "tmux logomark from the upstream repository",
+    "source_url": "https://raw.githubusercontent.com/tmux/tmux/master/logo/tmux-logomark.svg"
+  },
+  {
+    "id": "vscode",
+    "label": "Visual Studio Code",
+    "file": "vscode.svg",
+    "format": "svg",
+    "source": "VS Code icon from Microsoft's branding archive",
+    "source_url": "https://code.visualstudio.com/assets/branding/visual-studio-code-icons.zip"
+  },
+  {
+    "id": "cursor",
+    "label": "Cursor",
+    "file": "cursor.svg",
+    "format": "svg",
+    "source": "Cursor cube mark from the public brand asset archive",
+    "source_url": "https://ptht05hbb1ssoooe.public.blob.vercel-storage.com/assets/brand/cursor-brand-assets.zip"
+  },
+  {
+    "id": "windsurf",
+    "label": "Windsurf",
+    "file": "windsurf.svg",
+    "format": "svg",
+    "source": "Windsurf white symbol from the public brand assets",
+    "source_url": "https://exafunction.github.io/public/brand/windsurf-white-symbol.svg"
+  },
+  {
+    "id": "zed",
+    "label": "Zed",
+    "file": "zed.svg",
+    "format": "svg",
+    "source": "Extracted from the previously inlined site symbol based on Zed brand artwork"
+  },
+  {
+    "id": "warp",
+    "label": "Warp",
+    "file": "warp.svg",
+    "format": "svg",
+    "source": "Warp glyph from the public brand asset repository",
+    "source_url": "https://raw.githubusercontent.com/warpdotdev/brand-assets/main/Logos/Warp-Glyph-White%402x.svg"
+  }
+]

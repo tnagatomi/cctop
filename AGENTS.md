@@ -117,7 +117,7 @@ xcodebuild test -project menubar/CctopMenubar.xcodeproj -scheme CctopMenubar -co
 
 ### Website (`site/`)
 
-The public site at https://cctop.app lives in `site/index.html` — a single static page with no build step. Pushed to master, `.github/workflows/pages.yml` uploads `site/` as the GitHub Pages artifact and deploys.
+The public site at https://cctop.app lives in `site/index.html` — a single static page. Shared logo assets live under root `assets/icons/`. Pushed to master, `.github/workflows/pages.yml` stages `site/` plus `assets/icons/` as the GitHub Pages artifact and deploys.
 
 **One-time repo settings:**
 1. Settings > Pages > Source = "GitHub Actions".
@@ -126,12 +126,14 @@ The public site at https://cctop.app lives in `site/index.html` — a single sta
 
 **Local preview:**
 ```bash
-python3 -m http.server 8000 --directory site
+python3 -m http.server 8000
+# open http://localhost:8000/site/
 ```
 
 **What the site auto-syncs from the repo (no manual edit needed):**
 - Hero badge version — a small `fetch()` to the GitHub releases API overrides the static fallback at page load. The static fallback is bumped by `scripts/bump-version.sh`.
 - Screenshots — referenced via `https://raw.githubusercontent.com/st0012/cctop/master/docs/...`, so updating `docs/*.png` or `docs/*.gif` propagates to the site automatically.
+- Shared tool logos — referenced from `assets/icons/` and copied into the deployed Pages artifact.
 - DMG download links — use the `releases/latest/download/...` redirect, so they always point at the newest release.
 
 **What you must manually keep in sync when changing the implementation:**

@@ -2,17 +2,18 @@
 
 Source for the public site at https://cctop.app/.
 
-`index.html` is a single static file. No build step. The deploy is driven by
-`.github/workflows/pages.yml`, which uploads this folder as the Pages artifact
-on every push to `master` that touches `site/**`. The `CNAME` file in this
+`index.html` is a single static file. Shared logos live in `../assets/icons/`.
+The deploy is driven by `.github/workflows/pages.yml`, which stages this folder
+plus `assets/icons/` as the Pages artifact on every push to `master` that
+touches `site/**` or `assets/icons/**`. The `CNAME` file in this
 folder pins the custom domain (`cctop.app`) on every deploy — without it, the
 custom-domain setting gets cleared each time the artifact replaces the site.
 
 ## Local preview
 
 ```bash
-python3 -m http.server 8000 --directory site
-# open http://localhost:8000
+python3 -m http.server 8000
+# open http://localhost:8000/site/
 ```
 
 Screenshots are pulled from `https://raw.githubusercontent.com/st0012/cctop/master/docs/`,
@@ -25,6 +26,7 @@ they land on master — no site change required.
 |-----------------|--------------|------|
 | Latest GitHub Release | Hero badge version (`v0.14.0`) | Auto: a `fetch()` overrides the static value at page load. Static fallback is kept current by `scripts/bump-version.sh`. |
 | `docs/*.png`, `docs/*.gif` | Hero shot, feature screenshots, theme cards, install card | Auto via raw GitHub URLs — no site edit needed. |
+| `assets/icons/*` | Supported agent, editor, terminal, and multiplexer logos | Manual — canonical local icon files are copied into the deployed Pages artifact. |
 | `releases/latest/download/cctop-macOS-{arm64,x86_64}.dmg` | All Download buttons | Auto via the `releases/latest/` redirect — no site edit needed. |
 | README "Supported tools" table | `#tools` Coding agents grid | Manual — keep names + URLs in sync with the README table. |
 | README "Supported Editors & Terminals" table | `#tools` Editors & terminals tiers | Manual — keep the three tiers (exact pane / opens project / activates app) in sync with the README. |
