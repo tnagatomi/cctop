@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>cctop — launch video</title>
+<link rel="stylesheet" href="../../theme.css">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:1920px;height:1080px;overflow:hidden;background:var(--bg);color:var(--t1);
+    font-family:var(--disp);-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+  #stage{position:absolute;inset:0;width:1920px;height:1080px;background:
+     radial-gradient(1200px 900px at 24% 16%, #1d2034 0%, rgba(29,32,52,0) 60%),
+     radial-gradient(1100px 820px at 82% 92%, #1e1b26 0%, rgba(30,27,38,0) 60%),
+     linear-gradient(160deg,#15161f 0%, #1A1B26 46%, #191a28 100%);}
+  .head{color:#E8ECFB}
+  .accent{color:var(--accent)}
+
+  /* ---------- macOS menubar band ---------- */
+  #band{position:absolute;top:0;left:0;right:0;height:60px;display:flex;align-items:center;
+    padding:0 0 0 36px;background:rgba(18,19,28,.88);border-bottom:1px solid rgba(192,202,245,.09);
+    font-family:var(--mono);color:var(--t3);z-index:50;opacity:0;will-change:opacity}
+  #band .apple{color:var(--t2);opacity:.75;display:flex;align-items:center}
+  #band .cluster{margin-left:auto;display:flex;align-items:center;gap:22px;padding-right:36px}
+  #band .glyph{opacity:.6;color:var(--t2);display:flex;align-items:center}
+  #band .clock{font-size:20px;color:var(--t2);letter-spacing:.5px}
+  #pill{display:inline-flex;align-items:center;gap:10px;padding:8px 13px;border-radius:12px;background:rgba(0,0,0,.34);will-change:transform,box-shadow}
+  /* the real app menubar logo (MenubarIcon template), accent-tinted via mask — the app's own asset */
+  #pill .grid{width:30px;height:30px;opacity:0;background:var(--accent);
+    -webkit-mask:url(.video-build/assets/menubar-icon.png) center/contain no-repeat;
+            mask:url(.video-build/assets/menubar-icon.png) center/contain no-repeat}
+  #pill .sbar{display:flex;width:84px;height:14px;border-radius:6px;overflow:hidden;opacity:0}
+  #pill .sbar b{display:block;height:100%}
+  #pill .sbar .red{background:var(--red)}#pill .sbar .orange{background:var(--orange)}#pill .sbar .green{background:var(--green)}
+
+  /* ---------- popover panel ---------- */
+  #panel{position:absolute;overflow:hidden;border-radius:20px;border:1px solid rgba(192,202,245,.11);
+    box-shadow:0 54px 120px -34px rgba(0,0,0,.82), 0 0 90px -34px rgba(247,118,142,.26);background:#1c1d27;
+    opacity:0;will-change:left,top,width,height,opacity}
+  #panel img{position:absolute;top:0;left:0;width:100%;display:block}
+  #imgNav{opacity:0}
+  .ring{position:absolute;border-radius:13px;outline:3px solid rgba(247,118,142,.95);opacity:0;
+    box-shadow:0 0 0 9999px rgba(10,11,18,0), 0 0 32px 5px rgba(247,118,142,0)}
+  #badgeRing{position:absolute;border-radius:50%;outline:3px solid rgba(247,118,142,.95);opacity:0;
+    box-shadow:0 0 26px 4px rgba(247,118,142,.55);z-index:31;will-change:opacity}
+
+  /* ---------- type ---------- */
+  .word{position:absolute;will-change:transform,opacity;opacity:0}
+  .rail{position:absolute;width:500px;text-align:right;will-change:transform,opacity;opacity:0}
+  .h-rail{font-size:58px;font-weight:800;letter-spacing:-1.2px;line-height:1.08}
+  .ctr{position:absolute;left:0;right:0;text-align:center;will-change:transform,opacity;opacity:0}
+
+  /* hook dots */
+  #dots{position:absolute;left:0;right:0;top:524px;display:flex;gap:18px;justify-content:center;opacity:0}
+  #dots .pd{width:28px;height:28px;border-radius:50%;will-change:transform,opacity}
+
+  /* wordmark */
+  #mark{position:absolute;left:0;width:841px;justify-content:flex-end;top:404px;display:flex;align-items:center;gap:18px;opacity:0;will-change:transform,opacity}
+  #mark .bar{width:11px;height:96px;border-radius:6px;background:var(--accent)}
+  #mark .nm{font-size:118px;font-weight:700;letter-spacing:-4px;color:#E8ECFB}
+
+  /* keycaps */
+  #keys{position:absolute;display:flex;gap:12px;align-items:center;left:301px;width:540px;justify-content:flex-end;top:632px;opacity:0;will-change:opacity}
+  .cap{font-family:var(--mono);font-weight:700;color:#dfe3f5;min-width:70px;height:74px;
+    display:inline-flex;align-items:center;justify-content:center;line-height:1;
+    background:linear-gradient(180deg,#383d56,#2b2f45);border:1.5px solid #4e5474;
+    border-radius:15px;font-size:36px;box-shadow:0 7px 18px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.07)}
+  .cap.combo{font-family:var(--disp);font-weight:600;min-width:0;padding:0 26px;font-size:38px;letter-spacing:4px}
+  .cap.pressed{background:linear-gradient(180deg,#F7768E,#e0617a);color:#1A1B26;border:1.5px solid #ef6981;
+    transform:translateY(3px);box-shadow:0 0 24px 3px rgba(247,118,142,.55),inset 0 1px 0 rgba(255,255,255,.18)}
+  .keysThen{font-family:var(--mono);font-size:26px;color:var(--t3);margin:0 8px}
+  #jumpLink{position:absolute;left:740px;top:498px;z-index:30;opacity:0;will-change:opacity}
+
+  /* PAYOFF session card */
+  #payCard{position:absolute;left:812px;top:305px;width:820px;height:470px;border-radius:18px;overflow:hidden;
+    background:#16171f;border:1px solid rgba(192,202,245,.11);opacity:0;will-change:transform,opacity;
+    box-shadow:0 54px 120px -34px rgba(0,0,0,.85), 0 0 90px -34px rgba(158,206,106,.30)}
+  #payCard .tbar{height:54px;display:flex;align-items:center;gap:10px;padding:0 22px;background:#1b1d27;border-bottom:1px solid rgba(192,202,245,.07)}
+  #payCard .tl{width:13px;height:13px;border-radius:50%}
+  #payCard .tab{margin-left:12px;font-family:var(--mono);font-size:20px;color:var(--t2)}#payCard .tab b{color:var(--t1);font-weight:600}
+  #payCard .stat{margin-left:auto;font-family:var(--mono);font-size:19px;font-weight:600;color:var(--orange);display:flex;align-items:center;gap:9px}
+  #payCard .stat .sd{width:13px;height:13px;border-radius:50%;background:var(--orange)}
+  #payCard .body{padding:30px 34px}
+  #payCard .who{font-family:var(--mono);font-size:16px;color:var(--t3);margin-bottom:8px;letter-spacing:.4px}
+  #payCard .msg{margin-bottom:22px}
+  #payCard .agent .bub{display:inline-block;background:rgba(247,118,142,.14);border:1px solid rgba(247,118,142,.40);
+    color:#fbdce2;border-radius:15px;padding:14px 22px;font-size:27px;line-height:1.35}
+  #payCard .you{text-align:right}
+  #payCard .you .bub{display:inline-block;background:rgba(192,202,245,.06);border:1px solid rgba(192,202,245,.13);
+    color:var(--t1);border-radius:15px;padding:14px 22px;font-size:27px;font-weight:500}
+  #payCard .run{font-family:var(--mono);font-size:24px;color:var(--green);display:flex;align-items:center;gap:12px;margin-top:4px}
+  #payReply,#payRun{opacity:0;will-change:transform,opacity}
+
+  /* STACK chips */
+  #chips{position:absolute;display:grid;grid-template-columns:repeat(2,248px);gap:18px;left:327px;top:498px}
+  .chip{display:flex;align-items:center;gap:14px;padding:0 24px;height:64px;border-radius:16px;opacity:0;will-change:transform,opacity;
+    background:rgba(192,202,245,.05);border:1px solid rgba(192,202,245,.11);
+    font-family:var(--mono);font-size:27px;font-weight:600;color:var(--t1);white-space:nowrap}
+  .chip .tmark{width:26px;height:26px;flex:none;background:var(--t1);
+    -webkit-mask:center/contain no-repeat;mask:center/contain no-repeat}
+  .chip .tmark.wide{width:108px}   /* opencode is a wordmark, not a glyph */
+  #editors{position:absolute;left:201px;width:640px;text-align:right;top:680px;font-family:var(--mono);font-size:24px;color:#7d83a0;letter-spacing:.3px;line-height:1.5;opacity:0;will-change:transform,opacity}
+
+  /* THEMES fan */
+  .thpanel{position:absolute;overflow:hidden;border-radius:16px;border:1px solid rgba(255,255,255,.06);opacity:0;will-change:transform,opacity;
+    box-shadow:0 34px 70px -28px rgba(0,0,0,.8);transform-origin:bottom center}
+  .thpanel img{display:block;width:100%}
+
+  /* CTA */
+  #cta{position:absolute;inset:0;opacity:0}
+  #cta #icon{width:168px;height:168px;border-radius:38px;box-shadow:0 40px 90px -25px rgba(0,0,0,.8),0 0 70px -18px rgba(247,118,142,.4);will-change:transform,opacity}
+  #cta .nm{font-size:108px;font-weight:700;letter-spacing:-4px;color:#E8ECFB}
+  #cta .tg{font-size:38px;color:var(--t2);font-weight:500}
+  #cta .meta{font-family:var(--mono);font-size:25px;color:var(--t3);letter-spacing:1px}
+  #cta .url{font-size:56px;font-weight:700;color:var(--accent);letter-spacing:-.5px;position:relative}
+  #cta .url::after{content:"";position:absolute;left:50%;transform:translateX(-50%);bottom:-10px;height:3px;background:var(--accent);width:0%}
+
+  #tether{position:absolute;left:1500px;top:48px;opacity:0;z-index:40;will-change:opacity}
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- menubar band -->
+  <div id="band">
+    <span class="apple"><svg width="19" height="23" viewBox="0 0 384 512" fill="currentColor"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg></span>
+    <div class="cluster">
+      <div id="pill">
+        <span class="grid"></span>
+        <span class="sbar"><b class="red" style="flex:1"></b><b class="orange" style="flex:1"></b><b class="green" style="flex:3"></b></span>
+      </div>
+      <span class="glyph"><svg width="26" height="19" viewBox="0 0 24 18" fill="currentColor"><path d="M12 14.5a1.9 1.9 0 110 3.8 1.9 1.9 0 010-3.8zM5.2 10.6a9.6 9.6 0 0113.6 0l-2 2a6.8 6.8 0 00-9.6 0l-2-2zM1.4 6.8a15 15 0 0121.2 0l-2 2a12.2 12.2 0 00-17.2 0l-2-2z"/></svg></span>
+      <span class="glyph"><svg width="34" height="16" viewBox="0 0 28 14" fill="none"><rect x="1" y="2" width="22" height="10" rx="3" stroke="currentColor" stroke-width="1.4"/><rect x="3.4" y="4.2" width="13" height="5.6" rx="1.4" fill="currentColor"/><rect x="24.4" y="5" width="2.2" height="4" rx="1" fill="currentColor"/></svg></span>
+      <span class="clock">9:41</span>
+    </div>
+  </div>
+
+  <svg id="tether" width="200" height="160"><path d="M152 8 L152 70 Q152 86 134 96 L70 128" stroke="rgba(247,118,142,.45)" stroke-width="2" fill="none" stroke-dasharray="3 6"/></svg>
+
+  <!-- HOOK -->
+  <div class="ctr head" id="s1a" style="top:418px;font-size:74px;font-weight:800;letter-spacing:-2px">You've got <span class="accent">5 agents</span> working.</div>
+  <div id="dots">
+    <span class="pd" style="background:var(--red)"></span><span class="pd" style="background:var(--orange)"></span>
+    <span class="pd" style="background:var(--green)"></span><span class="pd" style="background:var(--green)"></span><span class="pd" style="background:var(--green)"></span>
+  </div>
+  <div class="ctr" id="s1b" style="top:614px;font-size:64px;font-weight:800;letter-spacing:-1.5px;color:#E8ECFB">Which one <span class="accent">needs you?</span></div>
+
+  <!-- REVEAL wordmark + tagline -->
+  <div id="mark"><span class="bar"></span><span class="nm">cctop</span></div>
+  <div class="word" id="markSub" style="left:141px;width:700px;text-align:right;top:566px;font-size:44px;font-weight:500;line-height:1.25;color:#aab0c8">Keep an eye on every<br>coding agent.</div>
+
+  <!-- PERSISTENT PANEL -->
+  <div id="panel">
+    <img id="imgDark" src=".video-build/assets/menubar-dark.png">
+    <img id="imgNav" src=".video-build/assets/menubar-navigate.png">
+    <div class="ring" id="spot" style="left:17px;top:329px;width:646px;height:157px"></div>
+  </div>
+  <div id="badgeRing" style="left:930px;top:513px;width:54px;height:54px"></div>
+  <svg id="jumpLink" width="280" height="210"><path d="M80 150 Q150 96 198 61" stroke="rgba(247,118,142,.55)" stroke-width="2.5" fill="none" stroke-dasharray="2 8" stroke-linecap="round"/></svg>
+
+  <!-- SCAN / JUMP rail headlines -->
+  <div class="rail h-rail head" id="scanHead" style="left:341px;top:486px">See every session<br>at a glance.</div>
+  <div class="rail h-rail head" id="jumpHead" style="left:341px;top:420px">Then jump<br>straight to it.</div>
+  <div id="keys">
+    <span class="cap combo">⌃⌘N</span><span class="keysThen">then</span><span class="cap pressed" id="cap2">2</span>
+  </div>
+
+  <!-- PAYOFF -->
+  <div class="word" id="payHead" style="left:288px;width:460px;text-align:right;top:430px;font-size:54px;font-weight:800;letter-spacing:-1px;line-height:1.1;color:#E8ECFB">One keystroke,<br>and you're <span class="accent">unblocking it.</span></div>
+  <div id="payCard">
+    <div class="tbar"><span class="tl" style="background:#ff5f57"></span><span class="tl" style="background:#febc2e"></span><span class="tl" style="background:#28c840"></span>
+      <span class="tab">billing-api · staging · <b>Codex</b></span>
+      <span class="stat" id="payStat"><span class="sd" id="payStatDot"></span><span id="payStatT">Waiting on you</span></span></div>
+    <div class="body">
+      <div class="msg agent"><div class="who">agent</div><span class="bub">Should we retry on 5xx, or surface the error to the user?</span></div>
+      <div class="msg you" id="payReply"><div class="who">you</div><span class="bub">Retry with backoff, then surface.</span></div>
+      <div class="msg run" id="payRun"><span class="ok" style="font-weight:700">✓ deploy is green</span></div>
+    </div>
+  </div>
+
+  <!-- STACK -->
+  <div class="word" id="stackHead" style="left:341px;width:500px;text-align:right;top:332px;font-size:54px;font-weight:800;letter-spacing:-1px;line-height:1.08;color:#E8ECFB">Works with the<br>stack you've got.</div>
+  <div id="chips">
+    <div class="chip"><span class="tmark" style="-webkit-mask-image:url(.video-build/assets/icons/claude.svg);mask-image:url(.video-build/assets/icons/claude.svg)"></span>Claude Code</div>
+    <div class="chip"><span class="tmark" style="-webkit-mask-image:url(.video-build/assets/icons/openai.svg);mask-image:url(.video-build/assets/icons/openai.svg)"></span>Codex</div>
+    <div class="chip" style="justify-content:center"><span class="tmark wide" style="-webkit-mask-image:url(.video-build/assets/icons/opencode.svg);mask-image:url(.video-build/assets/icons/opencode.svg)"></span></div>
+    <div class="chip"><span class="tmark" style="-webkit-mask-image:url(.video-build/assets/icons/pi.svg);mask-image:url(.video-build/assets/icons/pi.svg)"></span>pi</div>
+  </div>
+  <div id="editors">VS Code · Cursor · Zed<br>iTerm2 · Ghostty · Warp · Kitty · cmux</div>
+
+  <!-- THEMES -->
+  <div class="ctr head" id="themesHead" style="top:250px;font-size:62px;font-weight:800;letter-spacing:-1.4px">…and it suits your setup.</div>
+  <div id="thfan">
+    <div class="thpanel" style="left:300px;top:392px;width:480px;height:552px;z-index:1;background:#1c1d27"><img src=".video-build/assets/theme-tokyoNight-dark.png"></div>
+    <div class="thpanel" style="left:582px;top:368px;width:480px;height:552px;z-index:3;background:#282828"><img src=".video-build/assets/theme-gruvbox-dark.png"></div>
+    <div class="thpanel" style="left:858px;top:368px;width:480px;height:552px;z-index:4;background:#e5e9f0"><img src=".video-build/assets/theme-nord-light.png"></div>
+    <div class="thpanel" style="left:1140px;top:392px;width:480px;height:552px;z-index:2;background:#f3f1ea"><img src=".video-build/assets/theme-claude-light.png"></div>
+  </div>
+
+  <!-- CTA -->
+  <div id="cta">
+    <div class="ctr" style="top:262px"><img id="icon" src=".video-build/assets/appicon.png"></div>
+    <div class="ctr nm" id="ctaNm" style="top:454px">cctop</div>
+    <div class="ctr tg" id="ctaTg" style="top:606px">Find the agent that needs you, and jump straight in.</div>
+    <div class="ctr meta" id="ctaMeta" style="top:678px">Free &amp; open source · macOS menubar app</div>
+    <div class="ctr url" id="ctaUrl" style="top:742px">cctop.app</div>
+  </div>
+
+</div>
+
+<script src="../../lib.js"></script>
+<script>
+const TL={
+  hook:[0.0,3.2], morph:[3.1,4.2], reveal:[4.0,7.6], scan:[7.5,11.2],
+  jump:[11.1,14.3], payoff:[14.2,17.9], stack:[17.8,21.1], themes:[21.0,23.9], cta:[23.8,28.2]
+};
+const TOTAL=28.2;
+const PANEL={x:905,y:176,w:680,h:781};
+const PILL={x:1630,y:30};                       // pill centre — bloom origin + dot convergence
+const DOTC=[868,914,960,1006,1052], DOTY=538;   // hook dot centres at rest
+const THEME_ROT=[-6,-2,2,6];
+
+function seek(t){
+  drawHook(t);
+  drawBand(t);
+  drawReveal(t);
+  drawPanel(t);
+  drawScanJump(t);
+  drawPayoff(t);
+  drawStack(t);
+  drawThemes(t);
+  drawCTA(t);
+}
+
+/* HOOK + dots->pill morph */
+function drawHook(t){
+  const [a,b]=TL.hook, [m0,m1]=TL.morph;
+  set($('#s1a'), rev(t, a-1.5, a+0.3, m0-0.1, m0+0.3, 30));     // present on frame 0
+  set($('#s1b'), rev(t, a+1.2, a+1.9, m0-0.1, m0+0.3, 42));
+  const dotsEl=$('#dots'); dotsEl.style.opacity = mix(t, a+0.5, a+0.9);
+  const mp=eInOut(mix(t,m0,m1));
+  $$('#dots .pd').forEach((d,i)=>{
+    if(mp<=0){
+      const p=eBack(clamp(mix(t, a+0.55+i*0.08, a+1.05+i*0.08)));
+      d.style.transform=`scale(${p.toFixed(3)})`; d.style.opacity=1;
+    } else {
+      const land=eInOut(clamp(mix(t, m0, m0+0.72)));
+      const dx=lerp(0, PILL.x-DOTC[i], land), dy=lerp(0, PILL.y-DOTY, land), sc=lerp(1,0.12,land);
+      d.style.transform=`translate(${dx.toFixed(1)}px,${dy.toFixed(1)}px) scale(${sc.toFixed(3)})`;
+      d.style.opacity=1-clamp(mix(t, m0+0.6, m0+0.8));
+    }
+  });
+}
+
+/* menubar band + pill */
+function drawBand(t){
+  const [m0,m1]=TL.morph;
+  let o=mix(t, m0+0.05, m0+0.5);
+  if(t>=TL.payoff[0]-0.1 && t<TL.stack[0]-0.1) o*=0.70;                 // recede during payoff
+  if(t>=TL.themes[0]-0.1) o*=(1-mix(t, TL.themes[0]-0.1, TL.themes[0]+0.3)); // suppress for themes+cta
+  $('#band').style.opacity=o;
+  const seg=mix(t, m0+0.55, m0+0.82);
+  $('#pill .grid').style.opacity=seg; $('#pill .sbar').style.opacity=seg;
+  const hero=mix(t, m1, m1+0.5)*(1-mix(t, TL.reveal[1]-0.7, TL.reveal[1]-0.15));
+  const pill=$('#pill');
+  pill.style.boxShadow = hero>0.01
+    ? `0 0 0 ${(3*hero).toFixed(1)}px rgba(247,118,142,${(0.4*hero).toFixed(2)}),0 0 ${(38*hero).toFixed(0)}px ${(10*hero).toFixed(0)}px rgba(247,118,142,${(0.42*hero).toFixed(2)})`
+    : 'none';
+  pill.style.transform=`scale(${lerp(1,1.1,hero).toFixed(3)})`;
+  $('#tether').style.opacity = mix(t, m1+0.05, m1+0.45)*(1-mix(t, TL.reveal[1]-0.7, TL.reveal[1]-0.2));
+}
+
+/* REVEAL wordmark + tagline */
+function drawReveal(t){
+  const [a,b]=TL.reveal;
+  set($('#mark'), rev(t, a+0.5, a+1.15, b-0.45, b-0.05, 36));
+  set($('#markSub'), rev(t, a+0.95, a+1.55, b-0.45, b-0.05, 30));
+}
+
+/* PANEL: bloom from pill -> hold -> hard-cut -> fade for payoff -> return for stack -> gone at themes */
+function drawPanel(t){
+  const p=$('#panel');
+  const appear=3.9;   // bloom starts as the dots merge into the pill (no empty beat before the panel)
+  const win1End=(TL.payoff[0]+TL.stack[0])/2;
+  let op, bloom;
+  if(t<win1End){
+    op = mix(t, appear, appear+0.55) * (1 - mix(t, TL.payoff[0]-0.15, TL.payoff[0]+0.3));
+    bloom = eOut(mix(t, appear, appear+0.95));
+  } else {
+    op = mix(t, TL.stack[0]-0.05, TL.stack[0]+0.4) * (1 - mix(t, TL.themes[0]-0.15, TL.themes[0]+0.3));
+    bloom = 1;
+  }
+  let bx,by,bw,bh;
+  if(bloom<1){ bx=lerp(PILL.x-40,PANEL.x,bloom); by=lerp(PILL.y-14,PANEL.y,bloom); bw=lerp(84,PANEL.w,bloom); bh=lerp(96,PANEL.h,bloom); }
+  else { bx=PANEL.x; by=PANEL.y; bw=PANEL.w; bh=PANEL.h; }
+  p.style.left=bx+'px'; p.style.top=by+'px'; p.style.width=bw+'px'; p.style.height=bh+'px'; p.style.opacity=op;
+  const nav = (t>=TL.jump[0]+0.05 && t<TL.payoff[0]) ? 1 : 0;
+  $('#imgNav').style.opacity=nav; $('#imgDark').style.opacity=1-nav;
+  // SCAN spotlight on card 2 (vignette + ring), clipped to the panel
+  const sOn = mix(t, TL.scan[0]+0.45, TL.scan[0]+0.95) * (1 - mix(t, TL.scan[1]-0.55, TL.scan[1]-0.1));
+  const spot=$('#spot');
+  spot.style.opacity = sOn>0.02?1:0;
+  spot.style.boxShadow = `0 0 0 9999px rgba(10,11,18,${(0.6*sOn).toFixed(3)}), 0 0 32px 5px rgba(247,118,142,${(0.5*sOn).toFixed(3)})`;
+  spot.style.outlineColor = `rgba(247,118,142,${(0.95*sOn).toFixed(3)})`;
+}
+
+/* SCAN + JUMP rail headlines, keycaps, badge ring, connector */
+function drawScanJump(t){
+  set($('#scanHead'), rev(t, TL.scan[0]+0.3, TL.scan[0]+0.9, TL.scan[1]-0.55, TL.scan[1]-0.15, 36));
+  const [a,b]=TL.jump;
+  set($('#jumpHead'), rev(t, a+0.25, a+0.85, b-0.5, b-0.12, 36));
+  $('#keys').style.opacity = mix(t, a+0.7, a+1.1) * (1 - mix(t, b-0.5, b-0.15));
+  // press pulse on the "2" cap synced with the badge ring appearing
+  const pulse = clamp(mix(t, a+1.15, a+1.4)) * (1 - clamp(mix(t, a+1.7, a+2.3)));
+  $('#cap2').style.boxShadow = `0 0 ${(24+20*pulse).toFixed(0)}px ${(3+3*pulse).toFixed(0)}px rgba(247,118,142,${(0.55+0.35*pulse).toFixed(2)}),inset 0 1px 0 rgba(255,255,255,.18)`;
+  const ringOn = mix(t, a+1.25, a+1.6) * (1 - mix(t, b-0.4, b-0.1));
+  $('#badgeRing').style.opacity = ringOn;
+  $('#jumpLink').style.opacity = mix(t, a+1.35, a+1.7) * (1 - mix(t, b-0.4, b-0.1));
+}
+
+/* PAYOFF */
+function drawPayoff(t){
+  const [a,b]=TL.payoff;
+  const card=$('#payCard'), head=$('#payHead');
+  const active = t>=a-0.1 && t<b+0.1;
+  if(!active){ card.style.opacity=0; head.style.opacity=0; return; }
+  const en=eOut(mix(t,a,a+0.6));
+  card.style.opacity = mix(t,a+0.05,a+0.5)*(1-mix(t,b-0.4,b-0.05));
+  card.style.transform=`translateY(${lerp(26,0,en).toFixed(1)}px) scale(${lerp(0.97,1,en).toFixed(3)})`;
+  set(head, rev(t, a+0.45, a+1.0, b-0.4, b-0.05, 30));
+  const r=rev(t, a+0.95, a+1.35, b-0.4, b-0.05, 18);
+  $('#payReply').style.opacity=r.o; $('#payReply').style.transform=`translateY(${r.y}px)`;
+  const flip=mix(t, a+1.5, a+1.8);
+  $('#payStatDot').style.background = flip>0.5?'var(--green)':'var(--orange)';
+  $('#payStatT').textContent = flip>0.5?'Working':'Waiting on you';
+  $('#payStat').style.color = flip>0.5?'var(--green)':'var(--orange)';
+  const rr=rev(t, a+1.6, a+2.0, b-0.4, b-0.05, 14);
+  $('#payRun').style.opacity=rr.o; $('#payRun').style.transform=`translateY(${rr.y}px)`;
+}
+
+/* STACK */
+function drawStack(t){
+  const [a,b]=TL.stack;
+  set($('#stackHead'), rev(t, a+0.2, a+0.78, b-0.45, b-0.15, 30));
+  $$('#chips .chip').forEach((c,i)=>{
+    const p=eBack(clamp(mix(t, a+0.6+i*0.12, a+1.1+i*0.12)));
+    const o=clamp(mix(t, a+0.6+i*0.12, a+0.95+i*0.12))*(1-mix(t,b-0.45,b-0.15));
+    c.style.opacity=o; c.style.transform=`translateY(${lerp(28,0,p).toFixed(1)}px) scale(${lerp(.85,1,p).toFixed(3)})`;
+  });
+  set($('#editors'), rev(t, a+1.45, a+1.95, b-0.45, b-0.15, 20));
+}
+
+/* THEMES */
+function drawThemes(t){
+  const [a,b]=TL.themes;
+  set($('#themesHead'), rev(t, a+0.15, a+0.72, b-0.4, b-0.05, 30));
+  $$('#thfan .thpanel').forEach((c,i)=>{
+    const p=eBack(clamp(mix(t, a+0.4+i*0.1, a+1.0+i*0.1)));
+    const o=clamp(mix(t, a+0.4+i*0.1, a+0.82+i*0.1))*(1-mix(t,b-0.38,b-0.02));
+    c.style.opacity=o;
+    c.style.transform=`translateY(${lerp(60,0,p).toFixed(1)}px) rotate(${lerp(0,THEME_ROT[i],p).toFixed(2)}deg) scale(${lerp(.85,1,p).toFixed(3)})`;
+  });
+}
+
+/* CTA */
+function drawCTA(t){
+  const [a,b]=TL.cta;
+  const root=$('#cta'); const o=mix(t,a+0.1,a+0.55); root.style.opacity=o; if(o<=0) return;
+  const ic=$('#icon'); const ip=eBack(clamp(mix(t,a+0.15,a+0.95)));
+  ic.style.opacity=clamp(mix(t,a+0.15,a+0.5));
+  ic.style.transform=`translateY(${lerp(40,0,ip).toFixed(1)}px) scale(${lerp(.6,1,ip).toFixed(3)}) rotate(${lerp(-8,0,ip).toFixed(2)}deg)`;
+  set($('#ctaNm'), rev(t,a+0.5,a+1.0));
+  set($('#ctaTg'), rev(t,a+0.7,a+1.2));
+  set($('#ctaMeta'), rev(t,a+1.0,a+1.5));
+  set($('#ctaUrl'), rev(t,a+1.2,a+1.7));
+  const uw=clamp(mix(t,a+1.6,a+2.4))*100;
+  $('#ctaUrlStyle').textContent=`#cta .url::after{width:${uw}%}`;
+}
+
+const styleTag=document.createElement('style'); styleTag.id='ctaUrlStyle'; document.head.appendChild(styleTag);
+whenReady(seek);   // shared boot handshake (lib.js): expose seek, await fonts+images, paint frame 0, flag __ready
+</script>
+</body>
+</html>
