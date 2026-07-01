@@ -14,6 +14,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     private var updater: UpdaterBase!
     private var pluginManager: PluginManager!
     private var historyManager: HistoryManager!
+    private var cleanupManager: WorktreeCleanupManager!
+    private var cleanupRefreshGate: WorktreeCleanupRefreshGate!
+    private let cleanupRemovalService = WorktreeRemovalService.live()
     private var navigateController = NavigateController()
     private var notchController: NotchStatusController!
     private var navKeyMonitor: Any?
@@ -48,20 +51,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         notchController.onPillClicked = { [weak self] in self?.togglePanel() }
         historyManager = HistoryManager()
         sessionManager = SessionManager(historyManager: historyManager)
+        cleanupManager = WorktreeCleanupManager()
+        cleanupRefreshGate = WorktreeCleanupRefreshGate(manager: cleanupManager)
+        sessionManager.cleanupRefreshHandler = { [weak self] historySessions, activePaths in
+            self?.cleanupRefreshGate.updateSources(historySessions, activeProjectPaths: activePaths)
+        }
+        cleanupRefreshGate.updateSources(
+            sessionManager.cleanupSourceSessions,
+            activeProjectPaths: sessionManager.cleanupActiveProjectPaths
+        )
         updater = makeUpdater()
         pluginManager = PluginManager()
 
         setupStatusItem()
         hasNotch = NSScreen.builtin?.hasPhysicalNotch == true
 
-        let contentView = PanelContentView(
-            sessionManager: sessionManager,
-            historyManager: historyManager,
-            updater: updater,
-            pluginManager: pluginManager,
-            navigate: navigateController,
-            onLayoutChanged: { [weak self] in self?.resizePanel(animate: true) }
-        )
+        let contentView = makePanelContentView()
         let hostingView = NSHostingView(rootView: contentView)
         hostingView.wantsLayer = true
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
@@ -83,6 +88,78 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         registerURLHandler()
         observeSessionUpdates()
         observeThemeChanges()
+    }
+
+    private func makePanelContentView() -> PanelContentView {
+        PanelContentView(
+            sessionManager: sessionManager,
+            historyManager: historyManager,
+            cleanupManager: cleanupManager,
+            updater: updater,
+            pluginManager: pluginManager,
+            navigate: navigateController,
+            onRemoveCleanupCandidate: { [weak self] candidate in
+                await self?.removeCleanupCandidate(candidate) ?? .refused(candidate)
+            },
+            onForceRemoveCleanupCandidate: { [weak self] offer in
+                await self?.forceRemoveCleanupCandidate(offer) ?? .refused(offer.candidate)
+            },
+            onCleanupTabVisible: { [weak self] in
+                Task { @MainActor in self?.setCleanupVisible(true) }
+            },
+            onCleanupTabHidden: { [weak self] in
+                Task { @MainActor in self?.setCleanupVisible(false) }
+            },
+            onLayoutChanged: { [weak self] in
+                Task { @MainActor in self?.resizePanel(animate: true) }
+            }
+        )
+    }
+
+    @MainActor private func removeCleanupCandidate(
+        _ candidate: WorktreeCleanupCandidate
+    ) async -> WorktreeRemovalService.RemovalResult {
+        let cleanupSnapshot = sessionManager.cleanupSnapshotForRemoval()
+        let removalService = cleanupRemovalService
+        let result = await Task.detached(priority: .utility) {
+            removalService.remove(
+                candidate,
+                sourceSessions: cleanupSnapshot.sourceSessions,
+                activeProjectPaths: cleanupSnapshot.activeProjectPaths
+            )
+        }.value
+
+        if case .removed = result {
+            await MainActor.run {
+                cleanupRefreshGate.refreshIfVisible(force: true)
+            }
+        }
+        return result
+    }
+
+    @MainActor private func forceRemoveCleanupCandidate(
+        _ offer: WorktreeForceRemovalOffer
+    ) async -> WorktreeRemovalService.RemovalResult {
+        let cleanupSnapshot = sessionManager.cleanupSnapshotForRemoval()
+        let removalService = cleanupRemovalService
+        let result = await Task.detached(priority: .utility) {
+            removalService.forceRemove(
+                offer,
+                sourceSessions: cleanupSnapshot.sourceSessions,
+                activeProjectPaths: cleanupSnapshot.activeProjectPaths
+            )
+        }.value
+
+        if case .removed = result {
+            await MainActor.run {
+                cleanupRefreshGate.refreshIfVisible(force: true)
+            }
+        }
+        return result
+    }
+
+    @MainActor private func setCleanupVisible(_ visible: Bool) {
+        cleanupRefreshGate.setCleanupVisible(visible)
     }
 
     @MainActor private func registerShortcuts() {

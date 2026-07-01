@@ -2,6 +2,14 @@ import XCTest
 @testable import CctopMenubar
 import SwiftUI
 
+func snapshotOutputDirectory(named directoryName: String) -> String {
+    // Set CCTOP_SNAPSHOT_OUTPUT_DIR to intentionally refresh committed docs screenshots.
+    ProcessInfo.processInfo.environment["CCTOP_SNAPSHOT_OUTPUT_DIR"] ??
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(directoryName)
+            .path
+}
+
 @MainActor
 final class SnapshotTests: XCTestCase {
     /// Renders the PopupView with showcase sessions and saves light + dark screenshots.
@@ -103,6 +111,60 @@ final class SnapshotTests: XCTestCase {
         try renderScreenshot(view: view, colorScheme: .dark, filename: "menubar-recent.png")
     }
 
+    func testGenerateCleanupScreenshot() throws {
+        let view = PopupView(
+            sessions: Session.qaShowcase,
+            recentProjects: RecentProject.mockRecents,
+            cleanupCandidates: WorktreeCleanupCandidate.mockCandidates.filter(\.state.isActionable),
+            updater: DisabledUpdater(),
+            pluginManager: inertPluginManager(),
+            initialTab: .cleanup
+        )
+        try renderScreenshot(view: view, colorScheme: .dark, filename: "menubar-cleanup.png")
+    }
+
+    func testGenerateCleanupDetailScreenshots() throws {
+        let clean = WorktreeCleanupCandidate.mock(
+            path: "/Users/dev/projects/rdoc/.claude/worktrees/stupefied-panini-cface5",
+            sessionName: "Check RDoc option parser edge cases",
+            branch: "claude/stupefied-panini-cface5",
+            storageBytes: 4 * 1_024 * 1_024
+        )
+        let review = worstCaseReviewCleanupCandidate()
+        let candidates = [clean, review]
+
+        let cleanView = PopupView(
+            sessions: Session.qaShowcase,
+            recentProjects: RecentProject.mockRecents,
+            cleanupCandidates: candidates,
+            updater: DisabledUpdater(),
+            pluginManager: inertPluginManager(),
+            initialTab: .cleanup,
+            initialCleanupCandidate: clean
+        )
+        let reviewView = PopupView(
+            sessions: Session.qaShowcase,
+            recentProjects: RecentProject.mockRecents,
+            cleanupCandidates: candidates,
+            updater: DisabledUpdater(),
+            pluginManager: inertPluginManager(),
+            initialTab: .cleanup,
+            initialCleanupCandidate: review
+        )
+
+        let cleanSize = try renderScreenshot(
+            view: cleanView, colorScheme: .dark, filename: "menubar-cleanup-detail-clean.png"
+        )
+        let reviewSize = try renderScreenshot(
+            view: reviewView, colorScheme: .dark, filename: "menubar-cleanup-detail-review.png"
+        )
+
+        XCTAssertLessThanOrEqual(cleanSize.width, 320)
+        XCTAssertLessThanOrEqual(reviewSize.width, 320)
+        XCTAssertLessThanOrEqual(cleanSize.height, 430)
+        XCTAssertLessThanOrEqual(reviewSize.height, 430)
+    }
+
     /// Generates theme showcase screenshots for all 4 themes in both dark and light modes.
     ///
     /// Run with:
@@ -128,12 +190,15 @@ final class SnapshotTests: XCTestCase {
         PluginManager(homeDirectory: URL(fileURLWithPath: "/nonexistent"), refreshOnInit: false)
     }
 
+    @discardableResult
     private func renderScreenshot(
         view: some View, colorScheme: ColorScheme, filename: String, width: CGFloat = 320
-    ) throws {
-        let docsDir = ProcessInfo.processInfo.environment["SRCROOT"]
-            .map { $0 + "/../docs" } ?? "/tmp"
+    ) throws -> NSSize {
+        let docsDir = snapshotOutputDirectory(named: "cctop-screenshots")
         let outputPath = "\(docsDir)/\(filename)"
+        try FileManager.default.createDirectory(
+            at: URL(fileURLWithPath: docsDir), withIntermediateDirectories: true
+        )
 
         let appearance: NSAppearance.Name = colorScheme == .dark ? .darkAqua : .aqua
         let styled = view
@@ -176,6 +241,39 @@ final class SnapshotTests: XCTestCase {
 
         try pngData.write(to: URL(fileURLWithPath: outputPath))
         print("Screenshot saved to: \(outputPath)")
+        return fittingSize
+    }
+
+    private func worstCaseReviewCleanupCandidate() -> WorktreeCleanupCandidate {
+        let path = "/Users/st0012/projects/cctop/.claude/worktrees/very-long-review-worktree-name-for-layout"
+        let state = WorktreeCleanupCandidate.State.review([
+            "Worktree has uncommitted tracked changes",
+            WorktreeCleanupCandidate.untrackedFilesReason,
+            "No upstream branch",
+            "Worktree is locked",
+        ])
+        return WorktreeCleanupCandidate(
+            id: path,
+            sessionName: "Investigate cleanup tab layout with very long session naming",
+            worktreePath: path,
+            worktreeName: URL(fileURLWithPath: path).lastPathComponent,
+            branchName: "claude/review-layout-with-long-branch-name-and-no-upstream",
+            lastActiveAt: Date().addingTimeInterval(-86_400 * 16),
+            storageBytes: 426 * 1_024 * 1_024,
+            state: state,
+            checks: [
+                WorktreeCleanupCheck(label: "No active cctop sessions here", status: .ok),
+                WorktreeCleanupCheck(label: "Path is a registered linked worktree", status: .ok),
+                WorktreeCleanupCheck(label: "No uncommitted tracked changes", status: .review),
+                WorktreeCleanupCheck(label: "No untracked files", status: .review),
+                WorktreeCleanupCheck(label: "No ignored files", status: .ok),
+                WorktreeCleanupCheck(label: "Branch has no unique local commits", status: .review),
+                WorktreeCleanupCheck(label: "Main checkout path is known", status: .ok),
+                WorktreeCleanupCheck(label: "Worktree is not locked", status: .ok),
+                WorktreeCleanupCheck(label: "Storage size scan completed", status: .ok),
+            ],
+            reviewEvidence: WorktreeCleanupCandidate.mockReviewEvidence(for: state)
+        )
     }
 
     private func repoRoot() throws -> URL {

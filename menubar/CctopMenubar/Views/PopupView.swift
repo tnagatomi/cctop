@@ -2,32 +2,38 @@ import Combine
 import KeyboardShortcuts
 import SwiftUI
 
-enum PopupTab {
-    case active, idle, recent
-}
-
 private let overlayAnimationDuration: TimeInterval = 0.2
 private let relativeTimeRefresh = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
 
 struct PopupView: View {
     let sessions: [Session]
     var recentProjects: [RecentProject] = []
+    var cleanupCandidates: [WorktreeCleanupCandidate] = []
     @ObservedObject var updater: UpdaterBase
     let pluginManager: PluginManager
     var navigate: NavigateController?
     @ObservedObject var overlayController: OverlayController = OverlayController()
     var initialTab: PopupTab = .active
+    var initialCleanupCandidate: WorktreeCleanupCandidate?
+    var onRemoveCleanupCandidate: ((WorktreeCleanupCandidate) async -> WorktreeRemovalService.RemovalResult)?
+    var onForceRemoveCleanupCandidate: ((WorktreeForceRemovalOffer) async -> WorktreeRemovalService.RemovalResult)?
+    var onCleanupTabVisible: () -> Void = {}
+    var onCleanupTabHidden: () -> Void = {}
     /// Called (async on main) whenever content layout changes so the host can resize the panel.
     var onLayoutChanged: () -> Void = {}
     @State private var selectedTab: PopupTab = .active
-    @State private var selectedIndex: Int?
+    @State var selectedIndex: Int?
     @State private var gearHovered = false
     @State private var versionHovered = false
     @State private var shortcutHovered = false
+    @State var selectedCleanupCandidate: WorktreeCleanupCandidate?
+    @State var cleanupRemovalNotice: WorktreeRemovalNotice?
+    @State var removingCleanupCandidateID: String?
+    @State var pendingRemovalConfirmation: WorktreeRemovalConfirmation?
     @State private var ocBannerInstalled = false
     @State private var lastFocusTime: Date = .distantPast
     @State private var piBannerInstalled = false
-    @State private var relativeTimeNow = Date()
+    @State var relativeTimeNow = Date()
     @AppStorage("ocBannerDismissed") private var ocBannerDismissed = false
     @AppStorage("piBannerDismissed") private var piBannerDismissed = false
 
@@ -56,6 +62,7 @@ struct PopupView: View {
                     case .active: activeContent
                     case .idle: idleContent
                     case .recent: recentContent
+                    case .cleanup: cleanupContent
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -91,11 +98,29 @@ struct PopupView: View {
             handleNavAction(action)
         }
         .onReceive(relativeTimeRefresh) { relativeTimeNow = $0 }
-        .onChange(of: selectedTab) { _ in selectedIndex = nil }
+        .onChange(of: selectedTab) { handleSelectedTabChanged($0) }
         .onChange(of: sessions) { _ in ensureSelectedTabAvailable() }
         .onChange(of: recentProjects.map(\.id)) { _ in ensureSelectedTabAvailable() }
+        .onChange(of: actionableCleanupCandidates) { _ in handleCleanupCandidatesChanged() }
+        .onChange(of: selectedCleanupCandidate?.id) { _ in
+            cleanupRemovalNotice = nil
+            notifyLayoutChanged()
+        }
+        .alert(item: $pendingRemovalConfirmation) { confirmation in
+            removalAlert(for: confirmation)
+        }
         .onAppear {
             selectedTab = availableTabs.contains(initialTab) ? initialTab : .active
+            if selectedTab == .cleanup,
+               let initialCleanupCandidate,
+               actionableCleanupCandidates.contains(where: { $0.id == initialCleanupCandidate.id }) {
+                selectedCleanupCandidate = initialCleanupCandidate
+            }
+            if selectedTab == .cleanup {
+                onCleanupTabVisible()
+            } else {
+                onCleanupTabHidden()
+            }
         }
     }
 
@@ -116,6 +141,7 @@ struct PopupView: View {
             if !recentProjects.isEmpty {
                 tabButton("Recent", count: recentProjects.count, tab: .recent)
             }
+            tabButton("Cleanup", count: actionableCleanupCandidates.count, tab: .cleanup)
             Spacer()
         }
         .padding(.horizontal, 12)
@@ -250,29 +276,6 @@ struct PopupView: View {
             }
         }
     }
-
-    private var noActiveSessionsContent: some View {
-        emptyPlaceholder(systemImage: "circle.dotted", title: "No active sessions")
-    }
-
-    private var noIdleSessionsContent: some View {
-        emptyPlaceholder(systemImage: "moon", title: "No idle sessions")
-    }
-
-    private func emptyPlaceholder(systemImage: String, title: String) -> some View {
-        VStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .font(.system(size: 20))
-                .foregroundStyle(Color.textMuted)
-            Text(title)
-                .font(.system(size: 12))
-                .foregroundStyle(Color.textMuted)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
-    }
-
 }
 
 // MARK: - Overlay & Footer
@@ -368,11 +371,22 @@ extension PopupView {
     private var sortedIdleSessions: [Session] {
         Session.sorted(SessionDisplayPolicy.idleSessions(from: sessions))
     }
+    var actionableCleanupCandidates: [WorktreeCleanupCandidate] {
+        cleanupCandidates.filter(\.state.isActionable)
+    }
+
+    private func syncSelectedCleanupCandidate() {
+        selectedCleanupCandidate = Self.syncedCleanupCandidate(
+            selectedCleanupCandidate,
+            in: actionableCleanupCandidates
+        )
+    }
     private var availableTabs: [PopupTab] {
-        var tabs: [PopupTab] = [.active]
-        if !sortedIdleSessions.isEmpty { tabs.append(.idle) }
-        if !recentProjects.isEmpty { tabs.append(.recent) }
-        return tabs
+        PopupTab.availableTabs(
+            hasIdleSessions: !sortedIdleSessions.isEmpty,
+            hasRecentProjects: !recentProjects.isEmpty,
+            hasCleanupCandidates: !actionableCleanupCandidates.isEmpty
+        )
     }
 
     private func focusSession(_ session: Session) {
@@ -398,15 +412,9 @@ extension PopupView {
         DispatchQueue.main.asyncAfter(deadline: .now() + overlayAnimationDuration) { overlayController.hideContent = false }
     }
 
-    private func notifyLayoutChanged() {
+    func notifyLayoutChanged() {
         DispatchQueue.main.async { onLayoutChanged() }
     }
-    private func openInFinder(path: String) { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path) }
-    private func copyPath(_ path: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(path, forType: .string)
-    }
-
     private func handleNavAction(_ action: PanelNavAction) {
         switch action {
         case .up: moveSelection(by: -1)
@@ -423,6 +431,7 @@ extension PopupView {
         case .active: count = sortedActiveSessions.count
         case .idle: count = sortedIdleSessions.count
         case .recent: count = recentProjects.count
+        case .cleanup: count = actionableCleanupCandidates.count
         }
         guard count > 0 else { return }
         selectedIndex = selectedIndex.map { ($0 + delta + count) % count } ?? (delta > 0 ? 0 : count - 1)
@@ -430,19 +439,28 @@ extension PopupView {
 
     private func confirmSelection() {
         guard let index = selectedIndex else { return }
-        switch selectedTab {
-        case .active:
-            guard index < sortedActiveSessions.count else { return }
-            focusSession(sortedActiveSessions[index])
-        case .idle:
-            guard index < sortedIdleSessions.count else { return }
-            focusSession(sortedIdleSessions[index])
-        case .recent:
-            guard index < recentProjects.count else { return }
-            openInEditor(project: recentProjects[index])
-            NSApp.deactivate()
+        guard let target = PopupSelectionTarget.target(
+            for: selectedTab,
+            index: index,
+            in: PopupSelectionContext(
+                activeSessions: sortedActiveSessions,
+                idleSessions: sortedIdleSessions,
+                recentProjects: recentProjects,
+                cleanupCandidates: actionableCleanupCandidates
+            )
+        ) else {
+            return
         }
-        if isNavigateActive {
+        switch target {
+        case .activeSession(let session), .idleSession(let session):
+            focusSession(session)
+        case .recentProject(let project):
+            openInEditor(project: project)
+            NSApp.deactivate()
+        case .cleanupCandidate(let candidate):
+            openCleanupDetail(candidate)
+        }
+        if isNavigateActive && target.confirmsNavigate {
             navigate?.didConfirmSubject.send()
         }
     }
@@ -450,20 +468,7 @@ extension PopupView {
     private func switchTab(to action: PanelNavAction) {
         guard showTabs else { return }
         let tabs = availableTabs
-        guard let currentIndex = tabs.firstIndex(of: selectedTab) else {
-            selectedTab = .active
-            return
-        }
-        let newIndex: Int
-        switch action {
-        case .previousTab:
-            newIndex = (currentIndex - 1 + tabs.count) % tabs.count
-        case .nextTab, .toggleTab:
-            newIndex = (currentIndex + 1) % tabs.count
-        default:
-            return
-        }
-        let newTab = tabs[newIndex]
+        let newTab = PopupTab.switched(from: selectedTab, action: action, availableTabs: tabs)
         guard newTab != selectedTab else { return }
         if overlayController.active != nil { closeOverlay(animated: true) }
         withAnimation(.easeInOut(duration: 0.15)) { selectedTab = newTab }
@@ -475,5 +480,18 @@ extension PopupView {
             selectedTab = .active
             return
         }
+        syncSelectedCleanupCandidate()
     }
+
+    func handleCleanupCandidatesChanged() {
+        ensureSelectedTabAvailable()
+        syncSelectedCleanupCandidate()
+        cleanupRemovalNotice = nil
+        notifyLayoutChanged()
+    }
+
+    func openCleanupDetail(_ candidate: WorktreeCleanupCandidate) {
+        selectedCleanupCandidate = candidate
+    }
+
 }

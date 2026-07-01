@@ -31,6 +31,25 @@ final class PanelCoordinatorTests: XCTestCase {
         XCTAssertTrue(r.actions.contains(.startNavigateMode(panelWasClosed: true)))
     }
 
+    func testPanelOpenActionsDoNotForceCleanupRefresh() {
+        XCTAssertEqual(
+            handle(.menubarIconClicked(appIsActive: false), mode: .hidden).actions,
+            [.captureApps, .showPanel, .activateApp, .startNavKeyMonitor, .postNavAction(.reset)]
+        )
+        XCTAssertEqual(
+            handle(.navigateShortcut(), mode: .hidden).actions,
+            [.showPanel, .activateApp, .startNavKeyMonitor, .startNavigateMode(panelWasClosed: true)]
+        )
+        XCTAssertEqual(
+            handle(.menubarIconClicked(appIsActive: false, panelVisibleInActiveSpace: false), mode: .normal).actions,
+            [.captureApps, .showPanel, .activateApp, .startNavKeyMonitor, .postNavAction(.reset)]
+        )
+        XCTAssertEqual(
+            handle(.navigateShortcut(panelVisibleInActiveSpace: false), mode: .normal).actions,
+            [.showPanel, .activateApp, .startNavKeyMonitor, .startNavigateMode(panelWasClosed: true)]
+        )
+    }
+
     func testHidden_otherEvents_noOp() {
         let r = handle(.escape, mode: .hidden)
         XCTAssertEqual(r.state.mode, .hidden)
