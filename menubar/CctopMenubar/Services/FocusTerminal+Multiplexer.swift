@@ -4,12 +4,12 @@ import Foundation
 enum MultiplexerFocusStrategy: Equatable {
     /// cmux --socket $socket focus-surface --workspace $workspaceId --surface $surfaceId
     case cmux(socket: String, workspaceId: String, surfaceId: String?, paneId: String?, binaryPath: String)
+    /// herdr agent focus $paneId (with HERDR_SOCKET_PATH=$socket)
+    case herdr(socket: String, paneId: String, binaryPath: String)
     /// zellij --session $sessionName action focus-pane-id $paneId
     case zellij(sessionName: String, paneId: String, binaryPath: String)
     /// tmux -S $socket select-window -t $paneId && tmux -S $socket select-pane -t $paneId
     case tmux(socket: String, paneId: String, binaryPath: String)
-    /// herdr agent focus $paneId (with HERDR_SOCKET_PATH=$socket)
-    case herdr(socket: String, paneId: String, binaryPath: String)
 }
 
 /// Resolve multiplexer focus from session info. Returns nil when no multiplexer is present.
@@ -36,15 +36,15 @@ func resolveMultiplexerFocus(session: Session, multiplexerOverride: MultiplexerI
             paneId: paneId,
             binaryPath: binaryPath
         )
+    case .herdr(let socket, let paneId, let binaryPath):
+        guard let binaryPath else { return nil }
+        return .herdr(socket: socket, paneId: paneId, binaryPath: binaryPath)
     case .zellij(let sessionName, let paneId, let binaryPath):
         guard let binaryPath else { return nil }
         return .zellij(sessionName: sessionName, paneId: paneId, binaryPath: binaryPath)
     case .tmux(let socket, let paneId, let binaryPath):
         guard let binaryPath else { return nil }
         return .tmux(socket: socket, paneId: paneId, binaryPath: binaryPath)
-    case .herdr(let socket, let paneId, let binaryPath):
-        guard let binaryPath else { return nil }
-        return .herdr(socket: socket, paneId: paneId, binaryPath: binaryPath)
     }
 }
 
@@ -57,20 +57,20 @@ func executeMultiplexerFocus(_ strategy: MultiplexerFocusStrategy) {
             binaryPath: binaryPath, socket: socket, workspaceId: workspaceId,
             surfaceId: surfaceId, paneId: paneId
         )
+    case .herdr(let socket, let paneId, let binaryPath):
+        executeHerdrFocus(binaryPath: binaryPath, socket: socket, paneId: paneId)
     case .zellij(let sessionName, let paneId, let binaryPath):
         executeZellijFocus(binaryPath: binaryPath, sessionName: sessionName, paneId: paneId)
     case .tmux(let socket, let paneId, let binaryPath):
         executeTmuxFocus(binaryPath: binaryPath, socket: socket, paneId: paneId)
-    case .herdr(let socket, let paneId, let binaryPath):
-        executeHerdrFocus(binaryPath: binaryPath, socket: socket, paneId: paneId)
     }
 }
 
-// https://zellij.dev/documentation/controlling-zellij-through-cli
-private func executeZellijFocus(binaryPath: String, sessionName: String, paneId: String) {
+private func executeHerdrFocus(binaryPath: String, socket: String, paneId: String) {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: binaryPath)
-    process.arguments = ["--session", sessionName, "action", "focus-pane-id", paneId]
+    process.arguments = ["agent", "focus", paneId]
+    process.environment = ["HERDR_SOCKET_PATH": socket]
     process.standardOutput = FileHandle.nullDevice
     process.standardError = FileHandle.nullDevice
     do {
@@ -79,11 +79,11 @@ private func executeZellijFocus(binaryPath: String, sessionName: String, paneId:
     } catch {}
 }
 
-private func executeHerdrFocus(binaryPath: String, socket: String, paneId: String) {
+// https://zellij.dev/documentation/controlling-zellij-through-cli
+private func executeZellijFocus(binaryPath: String, sessionName: String, paneId: String) {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: binaryPath)
-    process.arguments = ["agent", "focus", paneId]
-    process.environment = ["HERDR_SOCKET_PATH": socket]
+    process.arguments = ["--session", sessionName, "action", "focus-pane-id", paneId]
     process.standardOutput = FileHandle.nullDevice
     process.standardError = FileHandle.nullDevice
     do {

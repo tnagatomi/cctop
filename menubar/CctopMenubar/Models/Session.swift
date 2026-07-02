@@ -95,12 +95,12 @@ struct TerminalInfo: Codable, Equatable {
 enum MultiplexerInfo: Codable, Equatable {
     /// cmux focus-surface --workspace $workspaceId --surface $surfaceId
     case cmux(socket: String, workspaceId: String, surfaceId: String?, paneId: String?, binaryPath: String?)
+    /// herdr agent focus $paneId (with HERDR_SOCKET_PATH=$socket)
+    case herdr(socket: String, paneId: String, binaryPath: String?)
     /// zellij --session $sessionName action focus-pane-id $paneId
     case zellij(sessionName: String, paneId: String, binaryPath: String?)
     /// tmux -S $socket select-window -t $paneId && tmux -S $socket select-pane -t $paneId
     case tmux(socket: String, paneId: String, binaryPath: String?)
-    /// herdr agent focus $paneId (with HERDR_SOCKET_PATH=$socket)
-    case herdr(socket: String, paneId: String, binaryPath: String?)
 
     private enum CodingKeys: String, CodingKey {
         case name
@@ -125,6 +125,12 @@ enum MultiplexerInfo: Codable, Equatable {
                 paneId: try container.decodeIfPresent(String.self, forKey: .paneId),
                 binaryPath: binaryPath
             )
+        case "herdr":
+            self = .herdr(
+                socket: try container.decode(String.self, forKey: .socket),
+                paneId: try container.decode(String.self, forKey: .paneId),
+                binaryPath: binaryPath
+            )
         case "zellij":
             self = .zellij(
                 sessionName: try container.decode(String.self, forKey: .sessionName),
@@ -133,12 +139,6 @@ enum MultiplexerInfo: Codable, Equatable {
             )
         case "tmux":
             self = .tmux(
-                socket: try container.decode(String.self, forKey: .socket),
-                paneId: try container.decode(String.self, forKey: .paneId),
-                binaryPath: binaryPath
-            )
-        case "herdr":
-            self = .herdr(
                 socket: try container.decode(String.self, forKey: .socket),
                 paneId: try container.decode(String.self, forKey: .paneId),
                 binaryPath: binaryPath
@@ -161,6 +161,11 @@ enum MultiplexerInfo: Codable, Equatable {
             try container.encodeIfPresent(surfaceId, forKey: .surfaceId)
             try container.encodeIfPresent(paneId, forKey: .paneId)
             try container.encodeIfPresent(binaryPath, forKey: .binaryPath)
+        case .herdr(let socket, let paneId, let binaryPath):
+            try container.encode("herdr", forKey: .name)
+            try container.encode(socket, forKey: .socket)
+            try container.encode(paneId, forKey: .paneId)
+            try container.encodeIfPresent(binaryPath, forKey: .binaryPath)
         case .zellij(let sessionName, let paneId, let binaryPath):
             try container.encode("zellij", forKey: .name)
             try container.encode(sessionName, forKey: .sessionName)
@@ -168,11 +173,6 @@ enum MultiplexerInfo: Codable, Equatable {
             try container.encodeIfPresent(binaryPath, forKey: .binaryPath)
         case .tmux(let socket, let paneId, let binaryPath):
             try container.encode("tmux", forKey: .name)
-            try container.encode(socket, forKey: .socket)
-            try container.encode(paneId, forKey: .paneId)
-            try container.encodeIfPresent(binaryPath, forKey: .binaryPath)
-        case .herdr(let socket, let paneId, let binaryPath):
-            try container.encode("herdr", forKey: .name)
             try container.encode(socket, forKey: .socket)
             try container.encode(paneId, forKey: .paneId)
             try container.encodeIfPresent(binaryPath, forKey: .binaryPath)

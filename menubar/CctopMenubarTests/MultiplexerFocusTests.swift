@@ -149,31 +149,6 @@ final class MultiplexerFocusTests: XCTestCase {
         XCTAssertEqual(env["CMUX_BUNDLED_CLI_PATH"], "/Applications/cmux.app/Contents/Resources/bin/cmux")
     }
 
-    func testZellijReturnsStrategy() {
-        let session = Session.mock(
-            terminal: TerminalInfo(
-                program: "Ghostty",
-                multiplexer: .zellij(sessionName: "dev", paneId: "terminal_3", binaryPath: "/usr/bin/zellij")
-            )
-        )
-        let strategy = resolveMultiplexerFocus(session: session)
-        XCTAssertEqual(strategy, .zellij(sessionName: "dev", paneId: "terminal_3", binaryPath: "/usr/bin/zellij"))
-    }
-
-    func testTmuxReturnsStrategy() {
-        let session = Session.mock(
-            terminal: TerminalInfo(
-                program: "Ghostty",
-                multiplexer: .tmux(socket: "/tmp/tmux-501/default", paneId: "%3", binaryPath: "/opt/homebrew/bin/tmux")
-            )
-        )
-        let strategy = resolveMultiplexerFocus(session: session)
-        XCTAssertEqual(
-            strategy,
-            .tmux(socket: "/tmp/tmux-501/default", paneId: "%3", binaryPath: "/opt/homebrew/bin/tmux")
-        )
-    }
-
     func testHerdrReturnsStrategy() {
         let session = Session.mock(
             terminal: TerminalInfo(
@@ -209,6 +184,31 @@ final class MultiplexerFocusTests: XCTestCase {
         )
         let strategy = resolveMultiplexerFocus(session: session)
         XCTAssertNil(strategy)
+    }
+
+    func testZellijReturnsStrategy() {
+        let session = Session.mock(
+            terminal: TerminalInfo(
+                program: "Ghostty",
+                multiplexer: .zellij(sessionName: "dev", paneId: "terminal_3", binaryPath: "/usr/bin/zellij")
+            )
+        )
+        let strategy = resolveMultiplexerFocus(session: session)
+        XCTAssertEqual(strategy, .zellij(sessionName: "dev", paneId: "terminal_3", binaryPath: "/usr/bin/zellij"))
+    }
+
+    func testTmuxReturnsStrategy() {
+        let session = Session.mock(
+            terminal: TerminalInfo(
+                program: "Ghostty",
+                multiplexer: .tmux(socket: "/tmp/tmux-501/default", paneId: "%3", binaryPath: "/opt/homebrew/bin/tmux")
+            )
+        )
+        let strategy = resolveMultiplexerFocus(session: session)
+        XCTAssertEqual(
+            strategy,
+            .tmux(socket: "/tmp/tmux-501/default", paneId: "%3", binaryPath: "/opt/homebrew/bin/tmux")
+        )
     }
 
     func testNoBinaryPathReturnsNil() {
@@ -298,6 +298,17 @@ final class MultiplexerFocusTests: XCTestCase {
         XCTAssertEqual(decoded, info)
     }
 
+    func testHerdrCodableRoundTrip() throws {
+        let info = MultiplexerInfo.herdr(
+            socket: "/Users/me/.config/herdr/herdr.sock",
+            paneId: "w1:p1",
+            binaryPath: "/opt/homebrew/bin/herdr"
+        )
+        let data = try JSONEncoder().encode(info)
+        let decoded = try JSONDecoder().decode(MultiplexerInfo.self, from: data)
+        XCTAssertEqual(decoded, info)
+    }
+
     func testZellijCodableRoundTrip() throws {
         let info = MultiplexerInfo.zellij(sessionName: "amzn", paneId: "42", binaryPath: "/usr/bin/zellij")
         let data = try JSONEncoder().encode(info)
@@ -307,17 +318,6 @@ final class MultiplexerFocusTests: XCTestCase {
 
     func testTmuxCodableRoundTrip() throws {
         let info = MultiplexerInfo.tmux(socket: "/tmp/tmux-501/default", paneId: "%3", binaryPath: "/opt/homebrew/bin/tmux")
-        let data = try JSONEncoder().encode(info)
-        let decoded = try JSONDecoder().decode(MultiplexerInfo.self, from: data)
-        XCTAssertEqual(decoded, info)
-    }
-
-    func testHerdrCodableRoundTrip() throws {
-        let info = MultiplexerInfo.herdr(
-            socket: "/Users/me/.config/herdr/herdr.sock",
-            paneId: "w1:p1",
-            binaryPath: "/opt/homebrew/bin/herdr"
-        )
         let data = try JSONEncoder().encode(info)
         let decoded = try JSONDecoder().decode(MultiplexerInfo.self, from: data)
         XCTAssertEqual(decoded, info)
@@ -366,6 +366,22 @@ final class MultiplexerFocusTests: XCTestCase {
         XCTAssertNil(json?["session_name"])
     }
 
+    func testHerdrJSONShape() throws {
+        let info = MultiplexerInfo.herdr(
+            socket: "/Users/me/.config/herdr/herdr.sock",
+            paneId: "w1:p1",
+            binaryPath: "/opt/homebrew/bin/herdr"
+        )
+        let data = try JSONEncoder().encode(info)
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: String]
+        XCTAssertEqual(json?["name"], "herdr")
+        XCTAssertEqual(json?["socket"], "/Users/me/.config/herdr/herdr.sock")
+        XCTAssertEqual(json?["pane_id"], "w1:p1")
+        XCTAssertEqual(json?["binary_path"], "/opt/homebrew/bin/herdr")
+        XCTAssertNil(json?["session_name"])
+        XCTAssertNil(json?["workspace_id"])
+    }
+
     func testZellijJSONShape() throws {
         let info = MultiplexerInfo.zellij(sessionName: "dev", paneId: "terminal_1", binaryPath: "/usr/bin/zellij")
         let data = try JSONEncoder().encode(info)
@@ -386,22 +402,6 @@ final class MultiplexerFocusTests: XCTestCase {
         XCTAssertEqual(json?["pane_id"], "%3")
         XCTAssertEqual(json?["binary_path"], "/opt/homebrew/bin/tmux")
         XCTAssertNil(json?["session_name"])
-    }
-
-    func testHerdrJSONShape() throws {
-        let info = MultiplexerInfo.herdr(
-            socket: "/Users/me/.config/herdr/herdr.sock",
-            paneId: "w1:p1",
-            binaryPath: "/opt/homebrew/bin/herdr"
-        )
-        let data = try JSONEncoder().encode(info)
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: String]
-        XCTAssertEqual(json?["name"], "herdr")
-        XCTAssertEqual(json?["socket"], "/Users/me/.config/herdr/herdr.sock")
-        XCTAssertEqual(json?["pane_id"], "w1:p1")
-        XCTAssertEqual(json?["binary_path"], "/opt/homebrew/bin/herdr")
-        XCTAssertNil(json?["session_name"])
-        XCTAssertNil(json?["workspace_id"])
     }
 
     func testUnknownMultiplexerFailsDecode() {
