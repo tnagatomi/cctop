@@ -306,6 +306,12 @@ enum HookHandler {
                 surfaceId: nil, paneId: paneId, binaryPath: path
             )
         }
+        // herdr: HERDR_SOCKET_PATH + HERDR_PANE_ID
+        if let socket = env["HERDR_SOCKET_PATH"], !socket.isEmpty,
+           let paneId = sanitizeTerminalSessionId(env["HERDR_PANE_ID"]) {
+            let path = resolveBinaryPath(env: env, name: "herdr")
+            return .herdr(socket: socket, paneId: paneId, binaryPath: path)
+        }
         // zellij: ZELLIJ_SESSION_NAME + ZELLIJ_PANE_ID
         if let sessionName = sanitizeTerminalSessionId(env["ZELLIJ_SESSION_NAME"]),
            let paneId = sanitizeTerminalSessionId(env["ZELLIJ_PANE_ID"]) {
