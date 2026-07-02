@@ -16,8 +16,8 @@ struct PopupView: View {
     @ObservedObject var overlayController: OverlayController = OverlayController()
     var initialTab: PopupTab = .active
     var initialCleanupCandidate: WorktreeCleanupCandidate?
-    var onRemoveCleanupCandidate: ((WorktreeCleanupCandidate) async -> WorktreeRemovalService.RemovalResult)?
-    var onForceRemoveCleanupCandidate: ((WorktreeForceRemovalOffer) async -> WorktreeRemovalService.RemovalResult)?
+    var onSelectCleanupRemovalAction: ((WorktreeCleanupCandidate) async -> WorktreeRemovalService.RemovalAction)?
+    var onExecuteCleanupRemovalAction: ((WorktreeRemovalService.RemovalAction) async -> WorktreeRemovalService.RemovalResult)?
     var onCleanupTabVisible: () -> Void = {}
     var onCleanupTabHidden: () -> Void = {}
     /// Called (async on main) whenever content layout changes so the host can resize the panel.
@@ -31,6 +31,7 @@ struct PopupView: View {
     @State var cleanupRemovalNotice: WorktreeRemovalNotice?
     @State var removingCleanupCandidateID: String?
     @State var pendingRemovalConfirmation: WorktreeRemovalConfirmation?
+    @State var cleanupRemovalSelectsCandidateOnResult = true
     @State private var ocBannerInstalled = false
     @State private var lastFocusTime: Date = .distantPast
     @State private var piBannerInstalled = false
@@ -105,7 +106,6 @@ struct PopupView: View {
         .onChange(of: actionableCleanupCandidates) { _ in handleCleanupCandidatesChanged() }
         .onChange(of: cleanupIsScanning) { _ in handleCleanupScanningChanged() }
         .onChange(of: selectedCleanupCandidate?.id) { _ in
-            cleanupRemovalNotice = nil
             notifyLayoutChanged()
         }
         .alert(item: $pendingRemovalConfirmation) { confirmation in
@@ -488,11 +488,12 @@ extension PopupView {
     func handleCleanupCandidatesChanged() {
         ensureSelectedTabAvailable()
         syncSelectedCleanupCandidate()
-        cleanupRemovalNotice = nil
+        cleanupRemovalNotice = Self.noticeAfterCleanupCandidatesChanged(cleanupRemovalNotice)
         notifyLayoutChanged()
     }
 
     func openCleanupDetail(_ candidate: WorktreeCleanupCandidate) {
+        cleanupRemovalNotice = nil
         selectedCleanupCandidate = candidate
     }
 

@@ -7,7 +7,7 @@ struct WorktreeCleanupTabView: View {
     var isScanning = false
     var relativeTimeNow = Date()
     var onSelect: (WorktreeCleanupCandidate) -> Void = { _ in }
-    var onRemove: (WorktreeCleanupCandidate, WorktreeForceRemovalOffer?) -> Void = { _, _ in }
+    var onRemove: (WorktreeCleanupCandidate) -> Void = { _ in }
     var removalNotice: WorktreeRemovalNotice?
     var removingCandidateID: String?
 
@@ -29,11 +29,21 @@ struct WorktreeCleanupTabView: View {
                 candidate: candidate,
                 relativeTimeNow: relativeTimeNow,
                 onBack: { selectedCandidate = nil },
-                onRemove: { onRemove(candidate, removalNotice?.forceOffer) },
+                onRemove: { onRemove(candidate) },
                 removalNotice: removalNotice,
                 isRemoving: removingCandidateID == candidate.id
             )
-        } else if candidates.isEmpty {
+        } else {
+            VStack(spacing: 0) {
+                listRemovalNotice
+                listOrEmptyContent
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var listOrEmptyContent: some View {
+        if candidates.isEmpty {
             VStack(spacing: 8) {
                 if isScanning {
                     ProgressView()
@@ -53,6 +63,35 @@ struct WorktreeCleanupTabView: View {
             .padding(.vertical, 24)
         } else {
             cleanupList
+        }
+    }
+
+    @ViewBuilder
+    private var listRemovalNotice: some View {
+        if let removalNotice {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(removalNotice.title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(removalNotice.blocksRemoval ? Color.statusAttention : Color.textPrimary)
+                Text(removalNotice.message)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.textSecondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background {
+                RoundedRectangle(cornerRadius: AppChrome.groupCornerRadius, style: .continuous)
+                    .fill(Color.statusAttention.opacity(removalNotice.blocksRemoval ? 0.08 : 0.04))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: AppChrome.groupCornerRadius, style: .continuous)
+                    .stroke(Color.statusAttention.opacity(removalNotice.blocksRemoval ? 0.22 : 0.12), lineWidth: 1)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 8)
         }
     }
 
@@ -105,13 +144,17 @@ struct WorktreeCleanupTabView: View {
     }
 
     private func cleanupCard(_ candidate: WorktreeCleanupCandidate, isSelected: Bool = false) -> some View {
-        WorktreeCleanupCardView(candidate: candidate, isSelected: isSelected, relativeTimeNow: relativeTimeNow)
-            .contentShape(Rectangle())
-            .onTapGesture {
+        WorktreeCleanupCardView(
+            candidate: candidate,
+            isSelected: isSelected,
+            relativeTimeNow: relativeTimeNow,
+            isRemoving: removingCandidateID == candidate.id,
+            onSelect: {
                 selectedCandidate = candidate
                 onSelect(candidate)
-            }
-            .help("Click to review cleanup details")
+            },
+            onRemove: { onRemove(candidate) }
+        )
     }
 }
 
@@ -120,7 +163,7 @@ struct WorktreeCleanupTabView: View {
         candidates: WorktreeCleanupCandidate.mockCandidates,
         selectedIndex: nil,
         selectedCandidate: .constant(nil),
-        onRemove: { _, _ in }
+        onRemove: { _ in }
     )
     .frame(width: 320)
 }
