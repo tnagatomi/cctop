@@ -46,6 +46,15 @@ Supported shapes:
 }
 ```
 
+```json
+{
+  "name": "herdr",
+  "socket": "/Users/me/.config/herdr/herdr.sock",
+  "pane_id": "w1:p1",
+  "binary_path": "/opt/homebrew/bin/herdr"
+}
+```
+
 All multiplexer fields are optional except the values needed for the specific
 jump strategy. Older live cmux session files may not have
 `terminal.multiplexer`; when the session process is still running and exposes
