@@ -8,6 +8,8 @@ enum MultiplexerFocusStrategy: Equatable {
     case zellij(sessionName: String, paneId: String, binaryPath: String)
     /// tmux -S $socket select-window -t $paneId && tmux -S $socket select-pane -t $paneId
     case tmux(socket: String, paneId: String, binaryPath: String)
+    /// herdr agent focus $paneId (with HERDR_SOCKET_PATH=$socket)
+    case herdr(socket: String, paneId: String, binaryPath: String)
 }
 
 /// Resolve multiplexer focus from session info. Returns nil when no multiplexer is present.
@@ -40,8 +42,9 @@ func resolveMultiplexerFocus(session: Session, multiplexerOverride: MultiplexerI
     case .tmux(let socket, let paneId, let binaryPath):
         guard let binaryPath else { return nil }
         return .tmux(socket: socket, paneId: paneId, binaryPath: binaryPath)
-    case .herdr:
-        return nil
+    case .herdr(let socket, let paneId, let binaryPath):
+        guard let binaryPath else { return nil }
+        return .herdr(socket: socket, paneId: paneId, binaryPath: binaryPath)
     }
 }
 
@@ -58,6 +61,8 @@ func executeMultiplexerFocus(_ strategy: MultiplexerFocusStrategy) {
         executeZellijFocus(binaryPath: binaryPath, sessionName: sessionName, paneId: paneId)
     case .tmux(let socket, let paneId, let binaryPath):
         executeTmuxFocus(binaryPath: binaryPath, socket: socket, paneId: paneId)
+    case .herdr(let socket, let paneId, let binaryPath):
+        executeHerdrFocus(binaryPath: binaryPath, socket: socket, paneId: paneId)
     }
 }
 
@@ -66,6 +71,19 @@ private func executeZellijFocus(binaryPath: String, sessionName: String, paneId:
     let process = Process()
     process.executableURL = URL(fileURLWithPath: binaryPath)
     process.arguments = ["--session", sessionName, "action", "focus-pane-id", paneId]
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    do {
+        try process.run()
+        process.waitUntilExit()
+    } catch {}
+}
+
+private func executeHerdrFocus(binaryPath: String, socket: String, paneId: String) {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: binaryPath)
+    process.arguments = ["agent", "focus", paneId]
+    process.environment = ["HERDR_SOCKET_PATH": socket]
     process.standardOutput = FileHandle.nullDevice
     process.standardError = FileHandle.nullDevice
     do {

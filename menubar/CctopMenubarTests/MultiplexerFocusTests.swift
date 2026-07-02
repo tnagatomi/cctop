@@ -174,6 +174,43 @@ final class MultiplexerFocusTests: XCTestCase {
         )
     }
 
+    func testHerdrReturnsStrategy() {
+        let session = Session.mock(
+            terminal: TerminalInfo(
+                program: "Ghostty",
+                multiplexer: .herdr(
+                    socket: "/Users/me/.config/herdr/herdr.sock",
+                    paneId: "w1:p1",
+                    binaryPath: "/opt/homebrew/bin/herdr"
+                )
+            )
+        )
+        let strategy = resolveMultiplexerFocus(session: session)
+        XCTAssertEqual(
+            strategy,
+            .herdr(
+                socket: "/Users/me/.config/herdr/herdr.sock",
+                paneId: "w1:p1",
+                binaryPath: "/opt/homebrew/bin/herdr"
+            )
+        )
+    }
+
+    func testHerdrNoBinaryPathReturnsNil() {
+        let session = Session.mock(
+            terminal: TerminalInfo(
+                program: "Ghostty",
+                multiplexer: .herdr(
+                    socket: "/Users/me/.config/herdr/herdr.sock",
+                    paneId: "w1:p1",
+                    binaryPath: nil
+                )
+            )
+        )
+        let strategy = resolveMultiplexerFocus(session: session)
+        XCTAssertNil(strategy)
+    }
+
     func testNoBinaryPathReturnsNil() {
         let session = Session.mock(
             terminal: TerminalInfo(
