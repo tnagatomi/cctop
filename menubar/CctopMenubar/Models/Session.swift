@@ -90,7 +90,7 @@ struct TerminalInfo: Codable, Equatable {
     }
 }
 
-/// Identifies a terminal multiplexer (cmux, zellij, tmux) hosting the session.
+/// Identifies a terminal multiplexer (cmux, zellij, tmux, herdr) hosting the session.
 /// Each variant carries exactly the fields needed for its focus command.
 enum MultiplexerInfo: Codable, Equatable {
     /// cmux focus-surface --workspace $workspaceId --surface $surfaceId
@@ -99,6 +99,8 @@ enum MultiplexerInfo: Codable, Equatable {
     case zellij(sessionName: String, paneId: String, binaryPath: String?)
     /// tmux -S $socket select-window -t $paneId && tmux -S $socket select-pane -t $paneId
     case tmux(socket: String, paneId: String, binaryPath: String?)
+    /// herdr agent focus $paneId (with HERDR_SOCKET_PATH=$socket)
+    case herdr(socket: String, paneId: String, binaryPath: String?)
 
     private enum CodingKeys: String, CodingKey {
         case name
@@ -135,6 +137,12 @@ enum MultiplexerInfo: Codable, Equatable {
                 paneId: try container.decode(String.self, forKey: .paneId),
                 binaryPath: binaryPath
             )
+        case "herdr":
+            self = .herdr(
+                socket: try container.decode(String.self, forKey: .socket),
+                paneId: try container.decode(String.self, forKey: .paneId),
+                binaryPath: binaryPath
+            )
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .name, in: container,
@@ -160,6 +168,11 @@ enum MultiplexerInfo: Codable, Equatable {
             try container.encodeIfPresent(binaryPath, forKey: .binaryPath)
         case .tmux(let socket, let paneId, let binaryPath):
             try container.encode("tmux", forKey: .name)
+            try container.encode(socket, forKey: .socket)
+            try container.encode(paneId, forKey: .paneId)
+            try container.encodeIfPresent(binaryPath, forKey: .binaryPath)
+        case .herdr(let socket, let paneId, let binaryPath):
+            try container.encode("herdr", forKey: .name)
             try container.encode(socket, forKey: .socket)
             try container.encode(paneId, forKey: .paneId)
             try container.encodeIfPresent(binaryPath, forKey: .binaryPath)

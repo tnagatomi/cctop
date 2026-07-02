@@ -40,6 +40,8 @@ func resolveMultiplexerFocus(session: Session, multiplexerOverride: MultiplexerI
     case .tmux(let socket, let paneId, let binaryPath):
         guard let binaryPath else { return nil }
         return .tmux(socket: socket, paneId: paneId, binaryPath: binaryPath)
+    case .herdr:
+        return nil
     }
 }
 
