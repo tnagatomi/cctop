@@ -90,7 +90,7 @@ struct TerminalInfo: Codable, Equatable {
     }
 }
 
-/// Identifies a terminal multiplexer (cmux, zellij, tmux, herdr) hosting the session.
+/// Identifies a terminal multiplexer (cmux, herdr, zellij, tmux) hosting the session.
 /// Each variant carries exactly the fields needed for its focus command.
 enum MultiplexerInfo: Codable, Equatable {
     /// cmux focus-surface --workspace $workspaceId --surface $surfaceId
